@@ -1,0 +1,10 @@
+/.idea/
+/bin/
+*.txt
+!resolvers.txt
+!local.txt
+*.bin
+vgcore.*
+core
+*.pcap
+*.cap
