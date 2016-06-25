@@ -1,8 +1,6 @@
 /.idea/
 /bin/
-*.txt
-!resolvers.txt
-!local.txt
+/CMakeLists.txt
 *.bin
 vgcore.*
 core
