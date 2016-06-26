@@ -14,6 +14,7 @@ Usage: ./bin/massdns [options] domainlist
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
   -h  --help             Show this help.
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same domain. (Default: 200)
+  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
   -o  --only-responses   Do not output DNS questions.
   -r  --resolvers        Text file containing DNS resolvers.
       --root             Allow running the program as root. Not recommended.

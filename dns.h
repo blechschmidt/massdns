@@ -56,8 +56,6 @@ const char* const ROOT = ".";
 #define DNS_CLASS_IN 0x01
 const char* const DNS_CLASS_IN_STRING = "IN";
 
-#define DNS_STANDARD_QUERY_FLAGS 0x120
-
 #define DNS_REPLY_NOERR 0
 #define DNS_REPLY_FORMERR 1
 #define DNS_REPLY_SERVFAIL 2
@@ -227,11 +225,11 @@ uint16_t dns_create_question_section(dns_packet *packet, char *query, int record
     return record_count;
 }
 
-dns_packet *dns_create_packet(char *query, int record_types, uint16_t transaction)
+dns_packet *dns_create_packet(char *query, int record_types, uint16_t transaction, uint16_t flags)
 {
     dns_packet *packet = safe_malloc(sizeof(*packet));
     packet->transaction = transaction;
-    packet->flags = DNS_STANDARD_QUERY_FLAGS;
+    packet->flags = flags;
     packet->questioncount = dns_create_question_section(packet, query, record_types);
     packet->answercount = 0;
     packet->answer = NULL;

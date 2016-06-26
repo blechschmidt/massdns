@@ -41,6 +41,7 @@ void print_help(char *file)
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same"
                     " domain. (Default: 200)\n"
+                    "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Allow running the program as root. Not recommended.\n"
@@ -147,6 +148,7 @@ typedef struct lookup_context
         bool no_authority;
         bool unknown_records;
         bool only_responses;
+        bool norecurse;
     } cmd_args;
 } lookup_context_t;
 
@@ -423,7 +425,12 @@ bool handle_domain(void *k, void *l, void *c)
     if (timediff(&now, &lookup->next_lookup) < 0)
     {
         char *buf = NULL;
-        dns_packet *packet = dns_create_packet(key, context->records, lookup->transaction);
+        uint16_t query_flags = DNS_ANSWER_AUTHENTICATED_FLAG;
+        if(!context->cmd_args.norecurse)
+        {
+            query_flags |= DNS_RECURSION_DESIRED_FLAG;
+        }
+        dns_packet *packet = dns_create_packet(key, context->records, lookup->transaction, query_flags);
         size_t packet_size = dns_packet_to_bytes(packet, &buf);
         dns_destroy_packet(packet);
         sockaddr_in_t *resolver = massdns_get_resolver((size_t) rand(), &context->resolvers);
@@ -653,6 +660,10 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--only-responses") == 0 || strcmp(argv[i], "-o") == 0)
         {
             context->cmd_args.only_responses = true;
+        }
+        else if (strcmp(argv[i], "--norecurse") == 0 || strcmp(argv[i], "-n") == 0)
+        {
+            context->cmd_args.norecurse = true;
         }
         else if (strcmp(argv[i], "--resolve-count") == 0 || strcmp(argv[i], "-c") == 0)
         {
