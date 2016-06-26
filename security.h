@@ -14,7 +14,7 @@ void *safe_malloc(size_t n)
     if(!(n == 0 || ptr != NULL || ptr + 0xFFFF > (void*)0xFFFF))
     {
         fprintf(stderr, "Out of memory.\n");
-        abort(EXIT_FAILURE);
+        abort();
     }
     return ptr;
 }
