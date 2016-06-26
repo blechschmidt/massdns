@@ -450,9 +450,7 @@ char *dns_get_name(char **current, char *packet, size_t packetlen)
             if(offset == 0 && !pointer_storage)
             {
                 free(buf);
-                buf = safe_malloc(strlen(ROOT) + 1);
-                strcpy(buf, ROOT);
-                return buf;
+                return NULL;
             }
 
             if (offset < 0 || offset >= packetlen)
@@ -493,6 +491,12 @@ char *dns_get_name(char **current, char *packet, size_t packetlen)
     if (pointer_storage != NULL)
     {
         *current = pointer_storage;
+    }
+    if(buf == NULL)
+    {
+        buf = safe_malloc(strlen(ROOT) + 1);
+        strcpy(buf, ROOT);
+        return buf;
     }
     return buf;
 }
