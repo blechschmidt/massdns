@@ -768,7 +768,7 @@ int dns_parse_raw_packet(dns_packet *packet, char *buf, size_t buflen)
     packet->answer = NULL;
     packet->authority = NULL;
     packet->additional = NULL;
-    if (packet->flags & DNS_RESPONSE_FLAG == 0 || packet->questioncount != 1)
+    if ((packet->flags & DNS_RESPONSE_FLAG) == 0 || packet->questioncount != 1)
     {
         return DNS_REPLY_FORMERR;
     }

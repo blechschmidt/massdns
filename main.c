@@ -576,7 +576,6 @@ void massdns_scan(lookup_context_t *context)
     print_stats(context);
     hashmapFree(context->map);
     context->map = NULL;
-    free(context);
     fclose(f);
 }
 
@@ -592,7 +591,8 @@ int main(int argc, char **argv)
         print_help(argc > 0 ? argv[0] : "massdns");
         return 1;
     }
-    lookup_context_t *context = safe_malloc(sizeof(*context));
+    lookup_context_t ctx;
+    lookup_context_t *context = &ctx;
     memset(&context->cmd_args, 0, sizeof(context->cmd_args));
     context->cmd_args.resolve_count = 50;
     context->cmd_args.hashmap_size = 500000;
