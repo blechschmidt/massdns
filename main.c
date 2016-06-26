@@ -17,6 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <inttypes.h>
 #include "security.h"
 #include "dns.h"
 #include "string.h"
@@ -520,7 +521,12 @@ void massdns_scan(lookup_context_t *context)
             fprintf(stderr, "[WARNING] Privileges were not dropped. This is not recommended.\n\n");
         }
     }
-
+    FILE* randomness = fopen("/dev/urandom", "r");
+    if(!randomness)
+    {
+        fprintf(stderr, "Failed to open /dev/urandom.\n");
+        exit(1);
+    }
     context->current_rate = 0;
     context->records = context->cmd_args.record_types;
     context->sock = sock;
@@ -552,6 +558,11 @@ void massdns_scan(lookup_context_t *context)
                     lookup = safe_malloc(sizeof(*lookup));
                     lookup->domain = value;
                     lookup->tries = 0;
+                    if(fread(&lookup->transaction, 1, sizeof(lookup->transaction), randomness) != sizeof(lookup->transaction))
+                    {
+                        fprintf(stderr, "Failed to get randomness for transaction id.\n");
+                        exit(1);
+                    }
                     lookup->transaction = (uint16_t) rand();
                     gettimeofday(&lookup->next_lookup, NULL);
                     hashmapPut(context->map, value, lookup);
@@ -577,6 +588,7 @@ void massdns_scan(lookup_context_t *context)
     hashmapFree(context->map);
     context->map = NULL;
     fclose(f);
+    fclose(randomness);
 }
 
 int main(int argc, char **argv)
