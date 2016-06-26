@@ -425,14 +425,10 @@ size_t dns_packet_to_bytes(dns_packet *packet, char **buf)
 
 char *dns_get_name(char **current, char *packet, size_t packetlen)
 {
-    //fprintf(stderr, "get_name (data off: %x)\n", *current - packet);
     char *packetend = packet + packetlen;
     size_t memsize = 0;
     char *buf = NULL;
     char *pointer_storage = NULL;
-    //fprintf(stderr, "Packet start: %p\n", packet);
-    //fprintf(stderr, "Packet length: %zu\n", packetlen);
-    //fprintf(stderr, "Packet end: %p\n", packetend);
     bool pointers[0xFFFF];
     memset(pointers, 0, sizeof(pointers));
     while (1)
@@ -444,7 +440,6 @@ char *dns_get_name(char **current, char *packet, size_t packetlen)
         }
         if (pointers[*current - packet])
         {
-            //fprintf(stderr, "Pointer loop detected.\n");
             free(buf);
             return NULL;
         }
@@ -462,11 +457,8 @@ char *dns_get_name(char **current, char *packet, size_t packetlen)
                 return buf;
             }
 
-            //fprintf(stderr, "Pointer detected at: %p (%x) to %d\n", *current, *current - packet, offset);
-            //fprintf(stderr, "Char: %x\n", (char)(*(*current + 1)));
             if (offset < 0 || offset >= packetlen)
             {
-                //fprintf(stderr, "Off1: %x\n", offset);
                 free(buf);
                 return NULL;
             }
@@ -481,7 +473,6 @@ char *dns_get_name(char **current, char *packet, size_t packetlen)
             uint8_t size = (uint8_t) (**current & 0x3F);
             if (*current + size >= packetend)
             {
-                //fprintf(stderr, "x\n");
                 free(buf);
                 return NULL;
             }
@@ -505,8 +496,6 @@ char *dns_get_name(char **current, char *packet, size_t packetlen)
     {
         *current = pointer_storage;
     }
-    //fprintf(stderr, "Result: %s\n", buf);
-    //fprintf(stderr, "End ptr: %zu\n", *current - packet);
     return buf;
 }
 
@@ -536,10 +525,6 @@ int dns_parse_answer_record(dns_record *record, char **begin, char *packet, size
     char *packetend = packet + packetlen;
     record->name = NULL;
     record->data = NULL;
-    //fprintf(stderr, "Packet begin: %p\n", packet);
-    //fprintf(stderr, "Packet length: %zu\n", packetlen);
-    //fprintf(stderr, "Packet end: %p\n", packetend);
-    //fprintf(stderr, "Packet offset: %p (%zu)\n", *begin, *begin - packet);
     if (*begin + 10 > packetend)
     {
         return DNS_REPLY_FORMERR;
@@ -559,8 +544,6 @@ int dns_parse_answer_record(dns_record *record, char **begin, char *packet, size
     {
         return DNS_REPLY_FORMERR;
     }
-    //fprintf(stderr, "Data len: %zu\n", record->len);
-    //fprintf(stderr, "Data offset: %p (%zu)\n", *begin, *begin - packet);
     char *data_begin = *begin;
     switch (record->type)
     {
@@ -595,7 +578,6 @@ int dns_parse_answer_record(dns_record *record, char **begin, char *packet, size
             dns_record_name *name = safe_malloc(sizeof(*name));
             name->name = NULL;
             name->name = dns_get_name(begin, packet, packetlen);
-            //fprintf(stderr, "Name: %s\n", name->name);
             record->data = name;
             return DNS_REPLY_NOERR;
         }
@@ -729,13 +711,6 @@ char *dns_record_to_string(dns_record *record, bool print_unknown)
             break;
         }
     }
-#ifdef DEBUG
-    /*if(result == NULL)
-    {
-        fprintf(stderr, "Type: %d\n", record->type);
-        fprintf(stderr, "ERR!\n");
-    }*/
-#endif
     return result;
 }
 
