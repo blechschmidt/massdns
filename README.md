@@ -1,8 +1,10 @@
 # MassDNS 0.1
-## A high-performance non-recursive DNS resolver
+## A high-performance non-recursive\* DNS resolver
 
-MassDNS is a simple high-performance non-recursive DNS resolver targetting those who seek to resolve a massive amount of domain names in the order of millions or even billions.
+MassDNS is a simple high-performance non-recursive\* DNS resolver targetting those who seek to resolve a massive amount of domain names in the order of millions or even billions.
 Without special configuration, MassDNS is capable of resolving over 100,000,000 domains per hour with a Gigabit ethernet link using publicly available resolvers.
+
+\* In this case, non-recursive is supposed to mean that MassDNS does not perform recursion itself but queries a supplied list of DNS resolvers with the recursion (RD) bit set.
 
 ## Compilation
 Clone the git repository and `cd` into the project root folder. Then run `make` to build from source.
