@@ -319,10 +319,6 @@ int massdns_receive_packet(int socket, void (*handle_packet)(dns_packet *, struc
     ssize_t num_received = recvfrom(socket, recvbuf, sizeof(recvbuf), 0, (struct sockaddr *) &recvaddr, &fromlen);
     if (num_received > 0)
     {
-        /*FILE* f = fopen("response.bin", "w");
-        fwrite(recvbuf, 1, (size_t)num_received, f);
-        fclose(f);*/
-        //fprintf(stderr, "\n\nRESULT\n================================\n");
         dns_packet *packet = safe_malloc(sizeof(*packet));
         int result = dns_parse_raw_packet(packet, recvbuf, (size_t) num_received);
         if (result == DNS_REPLY_FORMERR)
