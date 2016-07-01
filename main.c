@@ -563,7 +563,6 @@ void massdns_scan(lookup_context_t *context)
                         fprintf(stderr, "Failed to get randomness for transaction id.\n");
                         exit(1);
                     }
-                    lookup->transaction = (uint16_t) rand();
                     gettimeofday(&lookup->next_lookup, NULL);
                     hashmapPut(context->map, value, lookup);
                 }
