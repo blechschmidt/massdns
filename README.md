@@ -1,8 +1,11 @@
-# MassDNS 0.1
+# MassDNS 0.2
 ## A high-performance DNS stub resolver
 
 MassDNS is a simple high-performance DNS stub resolver targetting those who seek to resolve a massive amount of domain names in the order of millions or even billions.
 Without special configuration, MassDNS is capable of resolving over 100,000,000 domains per hour with a Gigabit ethernet link using publicly available resolvers.
+
+## Requirements
+MassDNS requires [ldns](https://www.nlnetlabs.nl/projects/ldns/). It can be installed using `apt-get install libldns-dev` on Debian or Ubuntu.
 
 ## Compilation
 Clone the git repository and `cd` into the project root folder. Then run `make` to build from source.
@@ -12,15 +15,15 @@ Clone the git repository and `cd` into the project root folder. Then run `make` 
 Usage: ./bin/massdns [options] domainlist
   -a  --no-authority     Omit records from the authority section of the response packets.
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
+  -e  --additional       Include response records within the additional section.
   -h  --help             Show this help.
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same domain. (Default: 200)
   -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
   -o  --only-responses   Do not output DNS questions.
   -r  --resolvers        Text file containing DNS resolvers.
       --root             Allow running the program as root. Not recommended.
-  -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 500000)
+  -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 100000)
   -t  --type             Record type to be resolved. (Default: A)
-  -u  --unknown-records  Include unknown/unimplemented DNS records.
 
 Supported record types:
   A
@@ -44,11 +47,11 @@ $ ./bin/massdns -r resolvers.txt -t AAAA example.txt > results.txt
 #### Example output
 Currently, MassDNS only supports output in text format which looks similar to the following:
 ```
-193.200.68.230 example.com IN AAAA 1466115053   # resolver, query name, class, record, Unix timestamp
-    example.com 21479 IN AAAA 2606:2800:220::1  # name, TTL, class, record, record data
-                                                # empty line separates answer and authority records 
-    example.com 21200 IN NS a.iana-servers.net  # name, TTL, class, record, record data
-                                                # ...
+193.200.68.230:53 1466115053 example.com. IN AAAA   # resolver, Unix timestamp, query name, class, record
+    example.com. 21479 IN AAAA 2606:2800:220::1     # name, TTL, class, record, record data
+                                                    # empty line separates answer and authority records 
+    example.com. 21200 IN NS a.iana-servers.net     # name, TTL, class, record, record data
+                                                    # ...
 ```
 
 The resolver IP address is included in order to make it easier for you to filter the output in case you detect that some resolvers produce bad results.
@@ -90,6 +93,5 @@ The privilege drop can be circumvented using the `--root` argument which is not 
 - Implement bandwidth limits
 - Employ cross-resolver checks to detect DNS poisoning and DNS spam (e.g. [Level 3 DNS hijacking](https://web.archive.org/web/20140302064622/http://james.bertelson.me/blog/2014/01/level-3-are-now-hijacking-failed-dns-requests-for-ad-revenue-on-4-2-2-x/))
 - Implement IO-multiplexing to prevent 100% usage of a single CPU core
-- Improve, complete, extend, split up and/or replace the DNS library (e.g. [libldns](https://www.nlnetlabs.nl/projects/ldns/))
 - Allow for the integration of dynamic libraries
 - Implement additional (binary) output formats
