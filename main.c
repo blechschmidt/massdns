@@ -41,12 +41,13 @@ void print_help(char *file)
                     "Usage: %s [options] domainlist\n"
                     "  -a  --no-authority     Omit records from the authority section of the response packets.\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
-                    "  -e  --additional       Include response records within the additional section."
+                    "  -e  --additional       Include response records within the additional section.\n"
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same"
                     " domain. (Default: 200)\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
+                    "  -p  --progress         Show the progress and remaining time.\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Allow running the program as root. Not recommended.\n"
                     "  -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 100000)\n"
@@ -138,6 +139,9 @@ typedef struct lookup_context
     size_t current_rate;
     bool initial;
     struct timeval start_time;
+    size_t total_domains;
+    struct timeval cooldown_time;
+    bool cooldown;
     struct cmd_args
     {
         bool root;
@@ -151,6 +155,7 @@ typedef struct lookup_context
         bool only_responses;
         bool additional;
         bool norecurse;
+        bool show_progress;
     } cmd_args;
 } lookup_context_t;
 
@@ -295,24 +300,46 @@ void print_stats(lookup_context_t *context)
     context->next_update = now;
     context->next_update.tv_sec += 1;
     long elapsed = timediff(&context->start_time, &now) / 1000;
+    long estimated = 0;
+    if(total != 0 && !context->initial)
+    {
+        estimated = elapsed * ((long)context->total_domains) / ((long)total) - elapsed + context->cmd_args.interval_ms * context->cmd_args.resolve_count / 1000;
+    }
+    if(context->cooldown)
+    {
+        estimated = (context->cmd_args.interval_ms * context->cmd_args.resolve_count - timediff(&context->cooldown_time, &now)) / 1000 + 1;
+        if(estimated < 0)
+        {
+            estimated = 0;
+        }
+    }
     FILE *print = stderr;
     if (!context->initial)
     {
+        if(context->cmd_args.show_progress)
+        {
+            fprintf(print, "\033[F\033[F");
+        }
         fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
     }
     else
     {
         context->initial = false;
     }
-    fprintf(print, "Succeeded queries: %zu (%.2f%%)\n", stats.noerr, (float) stats.noerr / total * 100);
-    fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr, (float) stats.formerr / total * 100);
-    fprintf(print, "Server failures: %zu (%.2f%%)\n", stats.servfail, (float) stats.servfail / total * 100);
-    fprintf(print, "Non-existent domains: %zu (%.2f%%)\n", stats.nxdomain, (float) stats.nxdomain / total * 100);
-    fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, (float) stats.refused / total * 100);
+    fprintf(print, "Succeeded queries: %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
+    fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr, total == 0 ? 0 : (float) stats.formerr / total * 100);
+    fprintf(print, "Server failures: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
+    fprintf(print, "Non-existent domains: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
+    fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "Total: %zu\n", total);
     fprintf(print, "Current rate: %zu pps\n", context->current_rate);
     fprintf(print, "Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
     fprintf(print, "Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60, elapsed % 60);
+    if(context->cmd_args.show_progress)
+    {
+        fprintf(print, "Estimated time left: %02ld h %02ld min %02ld sec\n", estimated / 3600, (estimated / 60) % 60, estimated % 60);
+        fprintf(print, "Progress: %.2f%%\n", context->total_domains == 0 ? 0: (float) total / context->total_domains * 100);
+    }
     fflush(print);
     context->current_rate = 0;
 }
@@ -582,13 +609,35 @@ void massdns_scan(lookup_context_t *context)
         perror("Failed to create socket");
         exit(1);
     }
-    FILE *f = fopen(context->cmd_args.domains, "r");
+    FILE *f;
+    if(context->cmd_args.show_progress)
+    {
+        f = fopen(context->cmd_args.domains, "r");
+        if (f == NULL)
+        {
+            perror("Failed to open domain file");
+            exit(1);
+        }
+        while(!feof(f))
+        {
+            if (0 <= getline(&line, &line_buflen, f))
+            {
+                trim_end(line);
+                strtolower(line);
+                if (strcmp(line, "") != 0)
+                {
+                    context->total_domains++;
+                }
+            }
+        }
+        fclose(f);
+    }
+    f = fopen(context->cmd_args.domains, "r");
     if (f == NULL)
     {
         perror("Failed to open domain file");
         exit(1);
     }
-
     if (geteuid() == 0)
     {
         fprintf(stderr, "You have started the program with root privileges.\n");
@@ -664,6 +713,11 @@ void massdns_scan(lookup_context_t *context)
 
             }
         }
+        if(!context->cooldown && hashmapSize(context->map) < context->cmd_args.hashmap_size)
+        {
+            context->cooldown = true;
+            gettimeofday(&context->cooldown_time, NULL);
+        }
         while (massdns_receive_packet(sock, massdns_handle_packet, context));
         if (feof(f) && hashmapSize(context->map) == 0)
         {
@@ -704,6 +758,8 @@ int main(int argc, char **argv)
     context->cmd_args.resolve_count = 50;
     context->cmd_args.hashmap_size = 100000;
     context->cmd_args.interval_ms = 200;
+    context->cooldown = false;
+    context->total_domains = 0;
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
@@ -771,6 +827,10 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--additional") == 0 || strcmp(argv[i], "-e") == 0)
         {
             context->cmd_args.additional = true;
+        }
+        else if (strcmp(argv[i], "--progress") == 0 || strcmp(argv[i], "-p") == 0)
+        {
+            context->cmd_args.show_progress = true;
         }
         else if (strcmp(argv[i], "--resolve-count") == 0 || strcmp(argv[i], "-c") == 0)
         {

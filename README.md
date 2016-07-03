@@ -20,6 +20,7 @@ Usage: ./bin/massdns [options] domainlist
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same domain. (Default: 200)
   -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
   -o  --only-responses   Do not output DNS questions.
+  -p  --progress         Show the progress and remaining time.
   -r  --resolvers        Text file containing DNS resolvers.
       --root             Allow running the program as root. Not recommended.
   -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 100000)
