@@ -117,6 +117,13 @@ typedef struct dns_stats_t
     size_t nxdomain;
     size_t notimp;
     size_t refused;
+    size_t yxdomain;
+    size_t yxrrset;
+    size_t nxrrset;
+    size_t notauth;
+    size_t notzone;
+    size_t timeout;
+    size_t mismatch;    
     size_t other;
 } dns_stats_t;
 
