@@ -347,7 +347,7 @@ void print_stats(lookup_context_t *context)
     fprintf(print, "NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
     fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
     for(int i=0;i<context->cmd_args.resolve_count;i++){
-      fprintf(print, "%u: %u ,",i+1,timeout_stats[i]);
+      fprintf(print, "%u: %u (%.0f\%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
     }
     fprintf(print, "\n");
     fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
