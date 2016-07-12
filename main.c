@@ -125,9 +125,12 @@ typedef struct dns_stats_t
     size_t timeout;
     size_t mismatch;
     size_t other;
+    size_t qsent;
 } dns_stats_t;
 
 dns_stats_t stats;
+
+unsigned int * timeout_stats;
 
 typedef struct lookup
 {
@@ -305,7 +308,7 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
 void print_stats(lookup_context_t *context)
 {
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
-                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.timeout +
+                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone +
                     stats.mismatch + stats.other;
     struct timeval now;
     gettimeofday(&now, NULL);
@@ -332,7 +335,7 @@ void print_stats(lookup_context_t *context)
         {
             fprintf(print, "\033[F\033[F");
         }
-        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
+        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
     }
     else
     {
@@ -342,11 +345,15 @@ void print_stats(lookup_context_t *context)
     fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr, total == 0 ? 0 : (float) stats.formerr / total * 100);
     fprintf(print, "SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
     fprintf(print, "NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
-    fprintf(print, "Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / total * 100);
+    fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
+    for(int i=0;i<context->cmd_args.resolve_count;i++){
+      fprintf(print, "%u: %u ,",i+1,timeout_stats[i]);
+    }
+    fprintf(print, "\n");
     fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
-    fprintf(print, "Total: %zu of %zu \n", total, context->total_domains);
-    fprintf(print, "Hashtable buckets: %u \n", hashmapBuckets(context->map));
+    fprintf(print, "Total queries sent: %zu \n", stats.qsent);
+    fprintf(print, "Total received: %zu of %zu \n", total, context->total_domains);
     fprintf(print, "Hashtable size: %u \n", hashmapSize(context->map));
     fprintf(print, "Current rate: %zu pps\n", context->current_rate);
     fprintf(print, "Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
@@ -381,7 +388,7 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     }
     lookup_t *lookup = hashmapGet(context->map, name);
 
-    if (lookup == NULL)
+    if (lookup == NULL) // domain is not in hashmap
     {
         stats.mismatch++;
         // not neccessarily a problem, sometimes we receive duplicate answers
@@ -611,17 +618,24 @@ bool handle_domain(void *k, void *l, void *c)
         while (n < 0)
         {
             n = sendto(context->sock, buf, packet_size, 0, (sockaddr_t *) resolver, sizeof(*resolver));
+            if(n<1) fprintf(stdout,"DEBUG: Sending for domain %s failed with ret code %u, retrying... \n",lookup->domain,n);
         }
+        stats.qsent++;
         free(buf);
         TIMEOUT: ; // label requires statement, hence empty statement
-        long addusec = context->cmd_args.interval_ms * 1000;
-        addusec += rand() % (addusec / 5); // Avoid congestion by adding some randomness
+        unsigned int timeout_random_scale=2; // 2 -> 50%
+        long addusec = context->cmd_args.interval_ms * 1000 / timeout_random_scale;
+        addusec += rand() % (addusec / timeout_random_scale); // Avoid congestion by adding some randomness
+        //addusec += rand() % (addusec / 5); // Avoid congestion by adding some randomness
         lookup->next_lookup.tv_usec = (now.tv_usec + addusec) % 1000000;
         lookup->next_lookup.tv_sec = now.tv_sec + (now.tv_usec + addusec) / 1000000;
         lookup->tries++;
+        timeout_stats[lookup->tries-1]++;
+        fprintf(stdout, "DEBUG: TIMEOUT #%2u for domain %s.\n", lookup->tries, lookup->domain);
         if (lookup->tries == context->cmd_args.resolve_count)
         {
             fprintf(stdout, "ERROR: TIMEOUT: Final timeout for domain %s after %u tries with %u s interval. \n", lookup->domain, lookup->tries, context->cmd_args.interval_ms/1000);
+            stats.timeout++;
             hashmapRemove(context->map, lookup->domain);
             free(lookup->domain);
             free(lookup);
@@ -896,6 +910,8 @@ int main(int argc, char **argv)
                 return 1;
             }
             context->cmd_args.resolve_count = (unsigned char) atoi(argv[++i]);
+            timeout_stats = malloc(sizeof(unsigned int)*context->cmd_args.resolve_count);
+            memset(timeout_stats,0,sizeof(unsigned int)*context->cmd_args.resolve_count);
         }
         else if (strcmp(argv[i], "--hashmap-size") == 0 || strcmp(argv[i], "-s") == 0)
         {
