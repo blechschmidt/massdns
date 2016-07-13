@@ -62,6 +62,7 @@ void print_help(char *file)
                     "  MX\n"
                     "  NS\n"
                     "  PTR\n"
+					"  SOA\n"
                     "  TXT\n",
             file
     );
@@ -82,6 +83,10 @@ int record_from_str(char *str)
     {
         return LDNS_RR_TYPE_CNAME;
     }
+	if (strcmp(str, "dname") == 0)
+	{
+		return LDNS_RR_TYPE_DNAME;
+	}
     if (strcmp(str, "mx") == 0)
     {
         return LDNS_RR_TYPE_MX;

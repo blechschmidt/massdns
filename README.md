@@ -35,6 +35,7 @@ Supported record types:
   MX
   NS
   PTR
+  SOA
   TXT
 ```
 By default, MassDNS will print status information on standard error, results are written to stdout. In order to store results, it is therefore recommended to use output redirection.
