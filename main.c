@@ -347,7 +347,7 @@ void print_stats(lookup_context_t *context)
     {
         context->initial = false;
     }
-    fprintf(print, "Queries with record type answer: %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
+    fprintf(print, "Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
     fprintf(print, "Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
     fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr, total == 0 ? 0 : (float) stats.formerr / total * 100);
     fprintf(print, "SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
@@ -383,11 +383,11 @@ void print_stats_final(lookup_context_t *context)
     struct timeval now;
     gettimeofday(&now, NULL);
     long elapsed = timediff(&context->start_time, &now) / 1000;
-    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries: %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS:  Format errors: %zu (%.2f%%)\n", stats.formerr, total == 0 ? 0 : (float) stats.formerr / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
+    fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
     for(int i=0;i<context->cmd_args.resolve_count;i++){
       fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
     }
@@ -458,7 +458,7 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
             }
             if (strcmp(packetstr, "") == 0)
             {
-                fprintf(stdout, "empty reply for %s", lookup->domain);
+                fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
             } else {
                 fprintf(stdout, "%s", packetstr);
                 stats.answers++;
