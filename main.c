@@ -38,7 +38,7 @@ typedef struct sockaddr sockaddr_t;
 void print_help(char *file)
 {
     fprintf(stderr, ""
-                    "Usage: %s [options] domainlist\n"
+                    "Usage: %s [options] domainlist (- for stdin) \n"
                     "  -a  --no-authority     Omit records from the authority section of the response packets.\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "  -e  --additional       Include response records within the additional section.\n"
@@ -48,6 +48,7 @@ void print_help(char *file)
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
                     "  -p  --progress         Show the progress and remaining time.\n"
+                    "  -q  --quiet            Quiet mode.\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Allow running the program as root. Not recommended.\n"
                     "  -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 100000)\n"
@@ -111,6 +112,7 @@ int record_from_str(char *str)
 
 typedef struct dns_stats_t
 {
+    size_t answers;
     size_t noerr;
     size_t formerr;
     size_t servfail;
@@ -125,9 +127,12 @@ typedef struct dns_stats_t
     size_t timeout;
     size_t mismatch;
     size_t other;
+    size_t qsent;
 } dns_stats_t;
 
 dns_stats_t stats;
+
+unsigned int * timeout_stats;
 
 typedef struct lookup
 {
@@ -149,6 +154,8 @@ typedef struct lookup_context
     size_t total_domains;
     struct timeval cooldown_time;
     bool cooldown;
+    bool stdin;
+    bool quiet;
     struct cmd_args
     {
         bool root;
@@ -163,6 +170,7 @@ typedef struct lookup_context
         bool additional;
         bool norecurse;
         bool show_progress;
+        bool quiet;
     } cmd_args;
 } lookup_context_t;
 
@@ -304,8 +312,9 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
 
 void print_stats(lookup_context_t *context)
 {
+    if(context->quiet) return;
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
-                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.timeout +
+                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone +
                     stats.mismatch + stats.other;
     struct timeval now;
     gettimeofday(&now, NULL);
@@ -332,21 +341,26 @@ void print_stats(lookup_context_t *context)
         {
             fprintf(print, "\033[F\033[F");
         }
-        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
+        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
     }
     else
     {
         context->initial = false;
     }
-    fprintf(print, "Succeeded queries: %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
+    fprintf(print, "Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
+    fprintf(print, "Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
     fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr, total == 0 ? 0 : (float) stats.formerr / total * 100);
     fprintf(print, "SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
     fprintf(print, "NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
-    fprintf(print, "Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / total * 100);
+    fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
+    for(int i=0;i<context->cmd_args.resolve_count;i++){
+      fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
+    }
+    fprintf(print, "\n");
     fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
-    fprintf(print, "Total: %zu of %zu \n", total, context->total_domains);
-    fprintf(print, "Hashtable buckets: %u \n", hashmapBuckets(context->map));
+    fprintf(print, "Total queries sent: %zu \n", stats.qsent);
+    fprintf(print, "Total received: %zu of %zu \n", total, context->total_domains);
     fprintf(print, "Hashtable size: %u \n", hashmapSize(context->map));
     fprintf(print, "Current rate: %zu pps\n", context->current_rate);
     fprintf(print, "Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
@@ -358,6 +372,35 @@ void print_stats(lookup_context_t *context)
     }
     fflush(print);
     context->current_rate = 0;
+}
+
+void print_stats_final(lookup_context_t *context)
+{
+    size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
+                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone +
+                    stats.mismatch + stats.other;
+    FILE *print = stdout;
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    long elapsed = timediff(&context->start_time, &now) / 1000;
+    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
+    for(int i=0;i<context->cmd_args.resolve_count;i++){
+      fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
+    }
+    fprintf(print, "\n");
+    fprintf(print, "DEBUG: FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Total queries sent: %zu \n", stats.qsent);
+    fprintf(print, "DEBUG: FINALSTATS: Total received: %zu \n", total);
+    fprintf(print, "DEBUG: FINALSTATS: config:  hashtable %u, timeout %u seconds, retries %u \n",
+    	context->cmd_args.hashmap_size, context->cmd_args.interval_ms/1000,  context->cmd_args.resolve_count);
+    fprintf(print, "DEBUG: FINALSTATS: Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
+    fprintf(print, "DEBUG: FINALSTATS: Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60, elapsed % 60);
+    fflush(print);
 }
 
 void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *ctx)
@@ -381,7 +424,7 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     }
     lookup_t *lookup = hashmapGet(context->map, name);
 
-    if (lookup == NULL)
+    if (lookup == NULL) // domain is not in hashmap
     {
         stats.mismatch++;
         // not neccessarily a problem, sometimes we receive duplicate answers
@@ -413,7 +456,13 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
               fprintf(stderr, "ABORT: packetstr == NULL \n");
                 abort();
             }
-            fprintf(stdout, "%s", packetstr);
+            if (strcmp(packetstr, "") == 0)
+            {
+                fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
+            } else {
+                fprintf(stdout, "%s", packetstr);
+                stats.answers++;
+            }
             free(packetstr);
             if (timediff(&now, &context->next_update) <= 0)
             {
@@ -611,17 +660,24 @@ bool handle_domain(void *k, void *l, void *c)
         while (n < 0)
         {
             n = sendto(context->sock, buf, packet_size, 0, (sockaddr_t *) resolver, sizeof(*resolver));
+            if(n<1) fprintf(stdout,"DEBUG: Sending for domain %s failed with ret code %u, retrying... \n",lookup->domain,n);
         }
+        stats.qsent++;
         free(buf);
         TIMEOUT: ; // label requires statement, hence empty statement
-        long addusec = context->cmd_args.interval_ms * 1000;
-        addusec += rand() % (addusec / 5); // Avoid congestion by adding some randomness
+        unsigned int timeout_random_scale=2; // 2 -> 50%
+        long addusec = context->cmd_args.interval_ms * 1000 / timeout_random_scale;
+        addusec += rand() % (addusec / timeout_random_scale); // Avoid congestion by adding some randomness
+        //addusec += rand() % (addusec / 5); // Avoid congestion by adding some randomness
         lookup->next_lookup.tv_usec = (now.tv_usec + addusec) % 1000000;
         lookup->next_lookup.tv_sec = now.tv_sec + (now.tv_usec + addusec) / 1000000;
         lookup->tries++;
+        timeout_stats[lookup->tries-1]++;
+        fprintf(stdout, "DEBUG: TIMEOUT #%2u for domain %s.\n", lookup->tries, lookup->domain);
         if (lookup->tries == context->cmd_args.resolve_count)
         {
             fprintf(stdout, "ERROR: TIMEOUT: Final timeout for domain %s after %u tries with %u s interval. \n", lookup->domain, lookup->tries, context->cmd_args.interval_ms/1000);
+            stats.timeout++;
             hashmapRemove(context->map, lookup->domain);
             free(lookup->domain);
             free(lookup);
@@ -665,7 +721,9 @@ void massdns_scan(lookup_context_t *context)
         exit(1);
     }
     FILE *f;
-    if(context->cmd_args.show_progress)
+    if(context->stdin){
+    	context->total_domains=1; // this is only for stats, so a false value is ok
+    } else if(context->cmd_args.show_progress)
     {
         f = fopen(context->cmd_args.domains, "r");
         if (f == NULL)
@@ -687,21 +745,26 @@ void massdns_scan(lookup_context_t *context)
         }
         fclose(f);
     }
-    f = fopen(context->cmd_args.domains, "r");
-    if (f == NULL)
+    if(!context->stdin)
     {
-        perror("Failed to open domain file");
-        exit(1);
+	    f = fopen(context->cmd_args.domains, "r");
+	    if (f == NULL)
+	    {
+	        perror("Failed to open domain file");
+	        exit(1);
+	    }
+    } else {
+    	f = stdin;
     }
     if (geteuid() == 0)
     {
-        fprintf(stderr, "You have started the program with root privileges.\n");
+        if(!context-> quiet) fprintf(stderr, "You have started the program with root privileges.\n");
         struct passwd *nobody = getpwnam(UNPRIVILEGED_USER);
         if (!context->cmd_args.root)
         {
             if (nobody && setuid(nobody->pw_uid) == 0)
             {
-                fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n", UNPRIVILEGED_USER);
+                if(!context-> quiet) fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n", UNPRIVILEGED_USER);
             }
             else if (!context->cmd_args.root)
             {
@@ -793,6 +856,7 @@ void massdns_scan(lookup_context_t *context)
     context->map = NULL;
     fclose(f);
     fclose(randomness);
+    print_stats_final(context);
 }
 
 int main(int argc, char **argv)
@@ -814,6 +878,7 @@ int main(int argc, char **argv)
     context->cmd_args.hashmap_size = 100000;
     context->cmd_args.interval_ms = 200;
     context->cooldown = false;
+    context->stdin = false;
     context->total_domains = 0;
     for (int i = 1; i < argc; i++)
     {
@@ -887,6 +952,10 @@ int main(int argc, char **argv)
         {
             context->cmd_args.show_progress = true;
         }
+        else if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0)
+        {
+            context->cmd_args.quiet = true;
+        }
         else if (strcmp(argv[i], "--resolve-count") == 0 || strcmp(argv[i], "-c") == 0)
         {
             if (i + 1 >= argc || atoi(argv[i + 1]) < 1 || atoi(argv[i + 1]) > 255)
@@ -896,6 +965,8 @@ int main(int argc, char **argv)
                 return 1;
             }
             context->cmd_args.resolve_count = (unsigned char) atoi(argv[++i]);
+            timeout_stats = malloc(sizeof(unsigned int)*context->cmd_args.resolve_count);
+            memset(timeout_stats,0,sizeof(unsigned int)*context->cmd_args.resolve_count);
         }
         else if (strcmp(argv[i], "--hashmap-size") == 0 || strcmp(argv[i], "-s") == 0)
         {
@@ -921,6 +992,14 @@ int main(int argc, char **argv)
         {
             if (context->cmd_args.domains == NULL)
             {
+            	if (strcmp(argv[i], "-") == 0)
+            	{
+                if(!context->quiet)
+                {
+                fprintf(stderr, "Reading domain list from stdin.\n");
+                }
+            		context->stdin=true;
+            	}
                 context->cmd_args.domains = argv[i];
             }
             else
