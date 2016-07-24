@@ -155,7 +155,6 @@ typedef struct lookup_context
     struct timeval cooldown_time;
     bool cooldown;
     bool stdin;
-    bool quiet;
     struct cmd_args
     {
         bool root;
@@ -312,8 +311,9 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
 
 void print_stats(lookup_context_t *context)
 {
-    if(context->quiet) return;
-    size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused 	+ stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
+    if(context->cmd_args.quiet) return;
+    size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
+                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
     struct timeval now;
     gettimeofday(&now, NULL);
     context->next_update = now;
@@ -375,8 +375,7 @@ void print_stats(lookup_context_t *context)
 void print_stats_final(lookup_context_t *context)
 {
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
-                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone +
-                    stats.mismatch + stats.other;
+                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
     FILE *print = stdout;
     struct timeval now;
     gettimeofday(&now, NULL);
@@ -756,13 +755,13 @@ void massdns_scan(lookup_context_t *context)
     }
     if (geteuid() == 0)
     {
-        if(!context-> quiet) fprintf(stderr, "You have started the program with root privileges.\n");
+        if(!context-> cmd_args.quiet) fprintf(stderr, "You have started the program with root privileges.\n");
         struct passwd *nobody = getpwnam(UNPRIVILEGED_USER);
         if (!context->cmd_args.root)
         {
             if (nobody && setuid(nobody->pw_uid) == 0)
             {
-                if(!context-> quiet) fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n", UNPRIVILEGED_USER);
+                if(!context->cmd_args.quiet) fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n", UNPRIVILEGED_USER);
             }
             else if (!context->cmd_args.root)
             {
@@ -992,7 +991,7 @@ int main(int argc, char **argv)
             {
             	if (strcmp(argv[i], "-") == 0)
             	{
-                if(!context->quiet)
+                if(!context->cmd_args.quiet)
                 {
                 fprintf(stderr, "Reading domain list from stdin.\n");
                 }
