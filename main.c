@@ -314,8 +314,7 @@ void print_stats(lookup_context_t *context)
 {
     if(context->quiet) return;
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
-                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone +
-                    stats.mismatch + stats.other;
+                   stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
     struct timeval now;
     gettimeofday(&now, NULL);
     context->next_update = now;
