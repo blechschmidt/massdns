@@ -1,7 +1,3 @@
-/*
-	B. Blechschmidt
-	https://cysec.biz/
-*/
 #define _GNU_SOURCE
 
 
