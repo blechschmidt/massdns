@@ -234,11 +234,13 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
 
     if(!context->cmd_args.only_responses)
     {
-        if(0 > ldns_buffer_printf(output, "%s%s%s:%u %ld ", ip_prefix, ip_suffix, nsbuffer, ntohs(((struct sockaddr_in *) &sa)->sin_port), now))
+		char* rcode_str = ldns_pkt_rcode2str(ldns_pkt_get_rcode(pkt));
+        if(0 > ldns_buffer_printf(output, "%s%s%s:%u %ld %s ", ip_prefix, nsbuffer, ip_suffix, ntohs(((struct sockaddr_in *) &sa)->sin_port), now, rcode_str))
         {
             fprintf(stdout, "ABORT: another ldns printf buffer fail \n");
             abort();
         }
+		free(rcode_str);
         for (i = 0; i < ldns_pkt_qdcount(pkt); i++)
         {
             status = ldns_rr2buffer_str_fmt(output, fmt, ldns_rr_list_rr(ldns_pkt_question(pkt), i));
@@ -301,7 +303,6 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
                 {
                     return status;
                 }
-
             }
         }
     }
@@ -427,91 +428,84 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
         return;
     }
     free(name);
+	ldns_buffer *buf = ldns_buffer_new(LDNS_MAX_PACKETLEN);
+	if(buf == NULL)
+	{
+		fprintf(stderr, "ABORT: buffer == NULL \n");
+		fprintf(stdout, "ABORT: buffer == NULL \n");
+		abort();
+	}
+	if(LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
+	{
+	  fprintf(stderr, "ABORT: output packet status not OK \n");
+	  fprintf(stderr, "ABORT: output packet status not OK \n");
+		abort();
+	}
+	char* packetstr = ldns_buffer_export2str(buf);
+	if(packetstr == NULL)
+	{
+	  fprintf(stderr, "ABORT: packetstr == NULL \n");
+	  fprintf(stderr, "ABORT: packetstr == NULL \n");
+		abort();
+	}
+	if (strcmp(packetstr, "") == 0)
+	{
+#ifdef DEBUG
+		fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
+#endif
+	} else {
+		fprintf(stdout, "%s", packetstr);
+		stats.answers++;
+	}
+	free(packetstr);
+	if (timediff(&now, &context->next_update) <= 0)
+	{
+		print_stats(context);
+	}
+	ldns_buffer_free(buf);
     switch (response_code)
     {
         case LDNS_RCODE_NOERROR:
             stats.noerr++;
-            ldns_buffer *buf = ldns_buffer_new(LDNS_MAX_PACKETLEN);
-            if(buf == NULL)
-            {
-                fprintf(stderr, "ABORT: buffer == NULL \n");
-                fprintf(stdout, "ABORT: buffer == NULL \n");
-                abort();
-            }
-            if(LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
-            {
-              fprintf(stderr, "ABORT: output packet status not OK \n");
-              fprintf(stderr, "ABORT: output packet status not OK \n");
-                abort();
-            }
-            char* packetstr = ldns_buffer_export2str(buf);
-            if(packetstr == NULL)
-            {
-              fprintf(stderr, "ABORT: packetstr == NULL \n");
-              fprintf(stderr, "ABORT: packetstr == NULL \n");
-                abort();
-            }
-            if (strcmp(packetstr, "") == 0)
-            {
-                fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
-            } else {
-                fprintf(stdout, "%s", packetstr);
-                stats.answers++;
-            }
-            free(packetstr);
-            if (timediff(&now, &context->next_update) <= 0)
-            {
-                print_stats(context);
-            }
-            ldns_buffer_free(buf);
             break;
         case LDNS_RCODE_FORMERR:
             stats.formerr++;
-            fprintf(stdout, "ERROR: FORMERR: %s \n", lookup->domain);
             break;
         case LDNS_RCODE_SERVFAIL:
             stats.servfail++;
-            fprintf(stdout, "ERROR: SERVFAIL: %s \n", lookup->domain);
             break;
         case LDNS_RCODE_NXDOMAIN:
             stats.nxdomain++;
-            fprintf(stdout, "ERROR: NXDOMAIN: %s \n", lookup->domain);
             break;
         case LDNS_RCODE_NOTIMPL:
             stats.notimp++;
-            fprintf(stdout, "ERROR: NOTIMPL: %s \n", lookup->domain);
             break;
         case LDNS_RCODE_REFUSED:
             stats.refused++;
-            fprintf(stdout, "ERROR: REFUSED: %s \n", lookup->domain);
             break;
         case LDNS_RCODE_YXDOMAIN:
            stats.yxdomain++;
-           fprintf(stdout, "ERROR: YXDOMAIN: %s \n", lookup->domain);
            break;
       case LDNS_RCODE_YXRRSET:
           stats.yxrrset++;
-          fprintf(stdout, "ERROR: YXRRSET: %s \n", lookup->domain);
           break;
       case LDNS_RCODE_NXRRSET:
           stats.nxrrset++;
-          fprintf(stdout, "ERROR: NXRRSET: %s \n", lookup->domain);
           break;
       case LDNS_RCODE_NOTAUTH:
           stats.notauth++;
-          fprintf(stdout, "ERROR: NOTAUTH: %s \n", lookup->domain);
           break;
       case LDNS_RCODE_NOTZONE:
           stats.notzone++;
-          fprintf(stdout, "ERROR: NOTZONE: %s \n", lookup->domain);
           break;
         default:
             stats.other++;
-            fprintf(stdout, "ERROR: OTHER: %s \n", lookup->domain);
             break;
     }
     context->current_rate++;
+#ifdef DEBUG
     fprintf(stdout, "DEBUG: Removing %s from hashtable. \n", lookup->domain);
+#endif
     hashmapRemove(context->map, lookup->domain);
     free(lookup->domain);
     free(lookup);
@@ -635,7 +629,9 @@ bool handle_domain(void *k, void *l, void *c)
         if(LDNS_STATUS_OK != ldns_pkt_query_new_frm_str(&packet, lookup->domain, context->cmd_args.record_types, LDNS_RR_CLASS_IN,
                                    query_flags))
         {
+#ifdef DEBUG
           fprintf(stdout, "ERROR: new query from string fail for domain %s , skipping... \n", lookup->domain);
+#endif
           // TODO: I do not think we have to free *packet, validate
           hashmapRemove(context->map, lookup->domain);
           return true;
@@ -645,7 +641,9 @@ bool handle_domain(void *k, void *l, void *c)
         size_t packet_size = 0;
         if(LDNS_STATUS_OK != ldns_pkt2wire(&buf, packet, &packet_size))
         {
+#ifdef DEBUG
           fprintf(stdout, "ERROR: pkt2wire fail, treating as timeout! \n");
+#endif
           goto TIMEOUT;
         }
         ldns_pkt_free(packet);
@@ -655,7 +653,9 @@ bool handle_domain(void *k, void *l, void *c)
         while (n < 0)
         {
             n = sendto(context->sock, buf, packet_size, 0, (sockaddr_t *) resolver, sizeof(*resolver));
+#ifdef DEBUG
             if(n<1) fprintf(stdout,"DEBUG: Sending for domain %s failed with ret code %zu, retrying... \n",lookup->domain,n);
+#endif
         }
         stats.qsent++;
         free(buf);
@@ -667,10 +667,14 @@ bool handle_domain(void *k, void *l, void *c)
         lookup->next_lookup.tv_usec = (now.tv_usec + addusec) % 1000000;
         lookup->next_lookup.tv_sec = now.tv_sec + (now.tv_usec + addusec) / 1000000;
         lookup->tries++;
+#ifdef DEBUG
         fprintf(stdout, "DEBUG: TIMEOUT #%2u for domain %s.\n", lookup->tries, lookup->domain);
+#endif
         if (lookup->tries == context->cmd_args.resolve_count)
         {
+#ifdef DEBUG
             fprintf(stdout, "ERROR: TIMEOUT: Final timeout for domain %s after %u tries with %u s interval. \n", lookup->domain, lookup->tries, context->cmd_args.interval_ms/1000);
+#endif
             stats.timeout++;
             hashmapRemove(context->map, lookup->domain);
             free(lookup->domain);
@@ -850,7 +854,9 @@ void massdns_scan(lookup_context_t *context)
     context->map = NULL;
     fclose(f);
     fclose(randomness);
+#ifdef DEBUG
     print_stats_final(context);
+#endif
 }
 
 int main(int argc, char **argv)
