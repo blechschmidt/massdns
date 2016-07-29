@@ -423,6 +423,7 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
         stats.mismatch++;
         // not neccessarily a problem, sometimes we receive duplicate answers
         fprintf(stdout, "ERROR: MISMATCH: Received answer for domain not in hashmap: \"%s\" \n", name);
+		free(name);
         return;
     }
     free(name);
