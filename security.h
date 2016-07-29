@@ -9,9 +9,20 @@
 void *safe_malloc(size_t n)
 {
     void *ptr = malloc(n);
-    // Check for successful allocation, ensure that UDP packet and DNS
-    // pointers (which are at max 0xFFFF bytes long) will not overflow
-    if(ptr == NULL && n != 0)
+    // Check for successful allocation
+    if(n != 0 && ptr == NULL)
+    {
+        fprintf(stderr, "Out of memory.\n");
+        abort();
+    }
+    return ptr;
+}
+
+void *safe_calloc(size_t n)
+{
+    void *ptr = calloc(n, 1);
+    // Check for successful allocation
+    if(n != 0 && ptr == NULL)
     {
         fprintf(stderr, "Out of memory.\n");
         abort();
@@ -19,4 +30,3 @@ void *safe_malloc(size_t n)
     return ptr;
 }
 #endif
-
