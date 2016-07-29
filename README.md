@@ -49,7 +49,7 @@ $ ./bin/massdns -r resolvers.txt -t AAAA example.txt > results.txt
 #### Example output
 Currently, MassDNS only supports output in text format which looks similar to the following:
 ```
-193.200.68.230:53 1466115053 example.com. IN AAAA   # resolver, Unix timestamp, query name, class, record
+193.200.68.230:53 1466115053 NOERROR example.com. IN AAAA   # resolver, Unix timestamp, query name, class, record
     example.com. 21479 IN AAAA 2606:2800:220::1     # name, TTL, class, record, record data
                                                     # empty line separates answer and authority records 
     example.com. 21200 IN NS a.iana-servers.net     # name, TTL, class, record, record data
