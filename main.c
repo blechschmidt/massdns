@@ -364,7 +364,7 @@ void print_stats(lookup_context_t *context)
     fprintf(print, "Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
     fprintf(print, "Total queries sent: %zu \n", stats.qsent);
     fprintf(print, "Total received: %zu of %zu \n", total, context->total_domains);
-    fprintf(print, "Hashtable size: %u \n", hashmapSize(context->map));
+    fprintf(print, "Hashtable size: %zu \n", hashmapSize(context->map));
     fprintf(print, "Current rate: %zu pps\n", context->current_rate);
     fprintf(print, "Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
     fprintf(print, "Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60, elapsed % 60);
@@ -398,7 +398,7 @@ void print_stats_final(lookup_context_t *context)
     fprintf(print, "DEBUG: FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: Total queries sent: %zu \n", stats.qsent);
     fprintf(print, "DEBUG: FINALSTATS: Total received: %zu \n", total);
-    fprintf(print, "DEBUG: FINALSTATS: config:  hashtable %u, timeout %u seconds, retries %u \n",
+    fprintf(print, "DEBUG: FINALSTATS: config:  hashtable %zu, timeout %u seconds, retries %u \n",
     	context->cmd_args.hashmap_size, context->cmd_args.interval_ms/1000,  context->cmd_args.resolve_count);
     fprintf(print, "DEBUG: FINALSTATS: Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
     fprintf(print, "DEBUG: FINALSTATS: Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60, elapsed % 60);
@@ -662,7 +662,7 @@ bool handle_domain(void *k, void *l, void *c)
         while (n < 0)
         {
             n = sendto(context->sock, buf, packet_size, 0, (sockaddr_t *) resolver, sizeof(*resolver));
-            if(n<1) fprintf(stdout,"DEBUG: Sending for domain %s failed with ret code %u, retrying... \n",lookup->domain,n);
+            if(n<1) fprintf(stdout,"DEBUG: Sending for domain %s failed with ret code %zu, retrying... \n",lookup->domain,n);
         }
         stats.qsent++;
         free(buf);
