@@ -59,7 +59,7 @@ void print_help(char *file)
                     "  MX\n"
                     "  NS\n"
                     "  PTR\n"
-					"  SOA\n"
+                    "  SOA\n"
                     "  TXT\n",
             file
     );
@@ -80,10 +80,10 @@ int record_from_str(char *str)
     {
         return LDNS_RR_TYPE_CNAME;
     }
-	if (strcmp(str, "dname") == 0)
-	{
-		return LDNS_RR_TYPE_DNAME;
-	}
+    if (strcmp(str, "dname") == 0)
+    {
+        return LDNS_RR_TYPE_DNAME;
+    }
     if (strcmp(str, "mx") == 0)
     {
         return LDNS_RR_TYPE_MX;
@@ -549,7 +549,7 @@ sockaddr_in_t *str_to_addr(char *str)
     return addr;
 }
 
-void free_element(single_list_t *list, size_t index, void *param)
+void free_element(single_list_element_t *list, size_t index, void *param)
 {
     free(list);
 }
@@ -564,11 +564,11 @@ buffer_t massdns_resolvers_from_file(char *filename)
         perror("Failed to open resolver file");
         exit(1);
     }
-    single_list_t *list = safe_malloc(sizeof(*list));
+    single_list_element_t *list = safe_malloc(sizeof(*list));
     list->next = NULL;
     list->data = NULL;
-    single_list_t *start = list;
-    single_list_t *previous = NULL;
+    single_list_element_t *start = list;
+    single_list_element_t *previous = NULL;
     while (!feof(f))
     {
         if (0 <= getline(&line, &line_buflen, f))
@@ -597,8 +597,8 @@ buffer_t massdns_resolvers_from_file(char *filename)
         line = NULL;
     }
     fclose(f);
-    buffer_t resolvers = single_list_to_array(start);
-    single_list_iterate(start, free_element, NULL);
+    buffer_t resolvers = single_list_element_to_array(start);
+    single_list_element_iterate(start, free_element, NULL);
     free(list);
     return resolvers;
 }
