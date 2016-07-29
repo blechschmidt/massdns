@@ -137,8 +137,6 @@ typedef struct dns_stats_t
 
 dns_stats_t stats;
 
-unsigned int * timeout_stats;
-
 typedef struct lookup
 {
     char *domain;
@@ -344,7 +342,7 @@ void print_stats(lookup_context_t *context)
         {
             fprintf(print, "\033[F\033[F");
         }
-        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
+        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
     }
     else
     {
@@ -356,9 +354,6 @@ void print_stats(lookup_context_t *context)
     fprintf(print, "SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
     fprintf(print, "NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
     fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
-    for(int i=0;i<context->cmd_args.resolve_count;i++){
-      fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
-    }
     fprintf(print, "\n");
     fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
@@ -390,9 +385,6 @@ void print_stats_final(lookup_context_t *context)
     fprintf(print, "DEBUG: FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
-    for(int i=0;i<context->cmd_args.resolve_count;i++){
-      fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
-    }
     fprintf(print, "\n");
     fprintf(print, "DEBUG: FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
@@ -674,7 +666,6 @@ bool handle_domain(void *k, void *l, void *c)
         lookup->next_lookup.tv_usec = (now.tv_usec + addusec) % 1000000;
         lookup->next_lookup.tv_sec = now.tv_sec + (now.tv_usec + addusec) / 1000000;
         lookup->tries++;
-        timeout_stats[lookup->tries-1]++;
         fprintf(stdout, "DEBUG: TIMEOUT #%2u for domain %s.\n", lookup->tries, lookup->domain);
         if (lookup->tries == context->cmd_args.resolve_count)
         {
@@ -967,8 +958,6 @@ int main(int argc, char **argv)
                 return 1;
             }
             context->cmd_args.resolve_count = (unsigned char) atoi(argv[++i]);
-            timeout_stats = malloc(sizeof(unsigned int)*context->cmd_args.resolve_count);
-            memset(timeout_stats,0,sizeof(unsigned int)*context->cmd_args.resolve_count);
         }
         else if (strcmp(argv[i], "--hashmap-size") == 0 || strcmp(argv[i], "-s") == 0)
         {
