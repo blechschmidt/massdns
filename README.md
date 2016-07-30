@@ -4,6 +4,9 @@
 MassDNS is a simple high-performance DNS stub resolver targetting those who seek to resolve a massive amount of domain names in the order of millions or even billions.
 Without special configuration, MassDNS is capable of resolving over 100,000,000 domains per hour with a Gigabit ethernet link using publicly available resolvers.
 
+## Contributors
+* [Quirin Scheitle](https://github.com/quirins), [Technical University of Munich](https://www.net.in.tum.de/members/scheitle/)
+
 ## Requirements
 MassDNS requires [ldns](https://www.nlnetlabs.nl/projects/ldns/). It can be installed using `apt-get install libldns-dev` on Debian or Ubuntu.
 
