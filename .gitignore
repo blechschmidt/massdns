@@ -1,5 +1,5 @@
 /.idea/
-/bin/
+bin/
 /CMakeLists.txt
 *.bin
 vgcore.*
