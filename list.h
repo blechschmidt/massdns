@@ -13,8 +13,8 @@ typedef struct single_list_element
 typedef struct
 {
     size_t count;
-    single_list_element_t* first;
-    single_list_element_t* last;
+    single_list_element_t *first;
+    single_list_element_t *last;
 } single_list_t;
 
 typedef struct double_list_element
@@ -27,8 +27,8 @@ typedef struct double_list_element
 typedef struct
 {
     size_t element_count;
-    double_list_element_t* first;
-    double_list_element_t* last;
+    double_list_element_t *first;
+    double_list_element_t *last;
 } double_list_t;
 
 void single_list_element_iterate(single_list_element_t *list, void (*f)(single_list_element_t *, size_t, void *),
@@ -41,6 +41,11 @@ void single_list_element_iterate(single_list_element_t *list, void (*f)(single_l
         f(list, counter++, param);
         list = next;
     }
+}
+
+void single_list_iterate(single_list_t *list, void (*f)(single_list_element_t *, size_t, void *), void *param)
+{
+    return single_list_element_iterate(list->first, f, param);
 }
 
 size_t _single_list_element_get_size(single_list_element_t *list, size_t size)
@@ -74,20 +79,20 @@ buffer_t single_list_element_to_array(single_list_element_t *list)
     return buf;
 }
 
-void* single_list_get_front(single_list_t* list)
+void *single_list_get_front(single_list_t *list)
 {
     return list->first->data;
 }
 
-single_list_t* single_list_new()
+single_list_t *single_list_new()
 {
-    single_list_t* list = safe_calloc(sizeof(*list));
+    single_list_t *list = safe_calloc(sizeof(*list));
     return list;
 }
 
-void single_list_free(single_list_t* list_holder)
+void single_list_free(single_list_t *list_holder)
 {
-    single_list_element_t* list = list_holder->first;
+    single_list_element_t *list = list_holder->first;
     while (list != NULL)
     {
         single_list_element_t *next = list->next;
@@ -96,26 +101,26 @@ void single_list_free(single_list_t* list_holder)
     }
 }
 
-void single_list_push_front(single_list_t *list, void* data)
+void single_list_push_front(single_list_t *list, void *data)
 {
-    single_list_element_t* new_element = safe_malloc(sizeof(*new_element));
+    single_list_element_t *new_element = safe_malloc(sizeof(*new_element));
     new_element->data = data;
     new_element->next = list->first;
     list->first = new_element;
-    if(list->last == NULL)
+    if (list->last == NULL)
     {
         list->last = new_element;
     }
     list->count++;
 }
 
-void single_list_push_back(single_list_t* list, void* data)
+void single_list_push_back(single_list_t *list, void *data)
 {
-    single_list_element_t* new_element = safe_malloc(sizeof(*new_element));
+    single_list_element_t *new_element = safe_malloc(sizeof(*new_element));
     new_element->data = data;
     new_element->next = NULL;
     list->count++;
-    if(list->last)
+    if (list->last)
     {
         list->last->next = new_element;
     }
