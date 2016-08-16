@@ -30,6 +30,7 @@
 
 typedef struct sockaddr_in sockaddr_in_t;
 typedef struct sockaddr sockaddr_t;
+typedef struct sockaddr_in6 sockaddr_in6_t;
 
 void print_help(char *file)
 {
@@ -529,29 +530,41 @@ int massdns_receive_packet(int socket, void (*handle_packet)(ldns_pkt *, struct 
     return 0;
 }
 
-sockaddr_in_t *str_to_addr(char *str)
+struct sockaddr_storage *str_to_addr(char *str)
 {
-    struct sockaddr_in *addr = safe_malloc(sizeof(*addr));
-    addr->sin_port = htons(53);
-    if (inet_pton(AF_INET, str, &addr->sin_addr) == 1)
+    sockaddr_in_t *ip4addr = safe_calloc(sizeof(*ip4addr));
+    sockaddr_in6_t *ip6addr = safe_calloc(sizeof(*ip6addr));
+    if (inet_pton(AF_INET, str, &ip4addr->sin_addr) == 1)
     {
-        addr->sin_family = AF_INET;
-    }
-    else if (inet_pton(AF_INET6, str, &addr->sin_addr) == 1)
-    {
-        addr->sin_family = AF_INET6;
+        ip4addr->sin_port = htons(53);
+        ip4addr->sin_family = AF_INET;
+        free(ip6addr);
+        return (struct sockaddr_storage *)ip4addr;
     }
     else
     {
-        free(addr);
+        char* colon = strstr(str, ":");
+        if(colon)
+        {
+            *colon = 0;
+            if (inet_pton(AF_INET, str, &ip4addr->sin_addr) == 1)
+            {
+                int port = atoi(colon + 1);
+                if(port == 0 || port > 0xFFFF)
+                {
+                    goto str_to_addr_error;
+                }
+                ip4addr->sin_port = htons((uint16_t)port);
+                ip4addr->sin_family = AF_INET;
+                free(ip6addr);
+                return (struct sockaddr_storage *)ip4addr;
+            }
+        }
+        str_to_addr_error:
+        free(ip4addr);
+        free(ip6addr);
         return NULL;
     }
-    return addr;
-}
-
-void free_element(single_list_element_t *list, size_t index, void *param)
-{
-    free(list);
 }
 
 buffer_t massdns_resolvers_from_file(char *filename)
@@ -564,42 +577,28 @@ buffer_t massdns_resolvers_from_file(char *filename)
         perror("Failed to open resolver file");
         exit(1);
     }
-    single_list_element_t *list = safe_malloc(sizeof(*list));
-    list->next = NULL;
-    list->data = NULL;
-    single_list_element_t *start = list;
-    single_list_element_t *previous = NULL;
+    single_list_t *list = single_list_new();
     while (!feof(f))
     {
         if (0 <= getline(&line, &line_buflen, f))
         {
             trim_end(line);
-            struct sockaddr_in *addr = str_to_addr(line);
+            struct sockaddr_storage *addr = str_to_addr(line);
             if (addr != NULL)
             {
-                list->data = addr;
-                list->next = safe_malloc(sizeof(*list));
-                previous = list;
-                list = list->next;
+                single_list_push_back(list, addr);
             }
             else
             {
                 fprintf(stderr, "\"%s\" is not a valid resolver. Skipped.\n", line);
             }
         }
-        else if (previous != NULL)
-        {
-            free(list);
-            list = NULL;
-            previous->next = NULL;
-        }
         free(line);
         line = NULL;
     }
     fclose(f);
-    buffer_t resolvers = single_list_element_to_array(start);
-    single_list_element_iterate(start, free_element, NULL);
-    free(list);
+    buffer_t resolvers = single_list_element_to_array(list->first);
+    single_list_free(list);
     return resolvers;
 }
 
@@ -787,6 +786,13 @@ void massdns_scan(lookup_context_t *context)
     context->initial = true;
     gettimeofday(&context->start_time, NULL);
     context->next_update = context->start_time;
+
+    if(context->resolvers.len == 0)
+    {
+        fprintf(stderr, "No valid resolver supplied. Exiting.\n");
+        exit(1);
+    }
+
     while (true)
     {
         while (hashmapSize(context->map) < context->cmd_args.hashmap_size && !feof(f))

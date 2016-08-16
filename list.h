@@ -99,6 +99,7 @@ void single_list_free(single_list_t *list_holder)
         free(list);
         list = next;
     }
+    free(list_holder);
 }
 
 void single_list_push_front(single_list_t *list, void *data)
