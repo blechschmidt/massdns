@@ -597,7 +597,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
         line = NULL;
     }
     fclose(f);
-    buffer_t resolvers = single_list_element_to_array(list->first);
+    buffer_t resolvers = single_list_to_array(list);
     single_list_free(list);
     return resolvers;
 }

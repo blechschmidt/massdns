@@ -6,27 +6,62 @@
 #include <stdio.h>
 #include <assert.h>
 
+/**
+ * Safely allocate memory on the heap by aborting on failure.
+ *
+ * @param n The size of the memory block.
+ * @return A pointer that points to the allocated block, NULL when requesting a block of zero bytes.
+ */
 void *safe_malloc(size_t n)
 {
+    if(n == 0)
+    {
+        return NULL;
+    }
     void *ptr = malloc(n);
     // Check for successful allocation
-    if(n != 0 && ptr == NULL)
+    if(ptr == NULL)
     {
-        fprintf(stderr, "Out of memory.\n");
+        perror("Memory allocation failed");
         abort();
     }
     return ptr;
 }
 
+/**
+ * Safely allocate memory on the heap and initialize it with zeroes by aborting on failure.
+ *
+ * @param n The size of the memory block.
+ * @return A pointer that points to the allocated block, NULL when requesting a block of zero bytes.
+ */
 void *safe_calloc(size_t n)
 {
+    if(n == 0)
+    {
+        return NULL;
+    }
     void *ptr = calloc(n, 1);
     // Check for successful allocation
-    if(n != 0 && ptr == NULL)
+    if(ptr == NULL)
     {
-        fprintf(stderr, "Out of memory.\n");
+        perror("Memory allocation failed");
         abort();
     }
     return ptr;
+}
+
+/**
+ * Safely free a memory allocation on the heap at the cost of a NULL assignment. Aims to prevent double free attacks.
+ *
+ * Example:
+ * char *x = malloc(10);
+ * safe_free(&x); // x == NULL
+ *
+ * @param ptr A pointer to a pointer that has been obtained using (safe_)malloc.
+ */
+void safe_free(void *ptr)
+{
+    free(*((void**)ptr));
+    *((void**)ptr) = NULL;
 }
 #endif
