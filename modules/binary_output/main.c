@@ -6,7 +6,7 @@
 
 #include "../../massdns.h"
 
-extern void massdns_handle_response(massdns_context_t *context, ldns_pkt *packet)
+extern void massdns_handle_response(massdns_context_t *context, ldns_pkt *packet, struct sockaddr_storage *address)
 {
     uint8_t *buffer;
     size_t len;
@@ -14,9 +14,16 @@ extern void massdns_handle_response(massdns_context_t *context, ldns_pkt *packet
     {
         if(len <= 0xFFFF)
         {
-            uint16_t netlen = htons(len);
-            fwrite(&netlen, sizeof(netlen), 1, context->outfile);
-            fwrite(buffer, sizeof(uint8_t), len, context->outfile);
+            struct timeval now;
+            if(0 != gettimeofday(&now, NULL))
+            {
+                bzero(&now, sizeof(now));
+            }
+            uint16_t shortlen = len;
+            fwrite(&now, sizeof(now), 1, context->outfile);
+            fwrite(address, sizeof(*address), 1, context->outfile);
+            fwrite(&shortlen, sizeof(shortlen), 1, context->outfile);
+            fwrite(buffer, sizeof(*buffer), len, context->outfile);
         }
         free(buffer);
     }

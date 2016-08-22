@@ -8,7 +8,7 @@ struct massdns_context;
 
 typedef struct
 {
-    void (*handle_response)(struct massdns_context *context, ldns_pkt *packet);
+    void (*handle_response)(struct massdns_context *context, ldns_pkt *packet, struct sockaddr_storage *server);
 } massdns_module_t;
 
 typedef struct massdns_context

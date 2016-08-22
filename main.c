@@ -428,7 +428,7 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     }
     if(context->module.handle_response)
     {
-        context->module.handle_response(context, packet);
+        context->module.handle_response(context, packet, &ns);
     }
     else
     {
