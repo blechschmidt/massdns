@@ -85,9 +85,9 @@ Please note that the labels within `in-addr.arpa` are reversed. In order to reso
 As a consequence, the Python script does not resolve the records in an ascending order which is an advantage because sudden heavy spikes at the name servers of IPv4 subnets are avoided.
 
 #### Brute-forcing subdomains
-Similar to [subbrute](https://github.com/TheRook/subbrute), MassScan allows you to brute force subdomains using the included `subbrute.py` script:
+Similar to [subbrute](https://github.com/TheRook/subbrute), MassDNS allows you to brute force subdomains using the included `subbrute.py` script:
 ```
-$ ./subbrute.py names.txt example.com | ./bin/massdns -r resolvers.txt -t A -a -o -w example.com_subdomains -
+$ ./subbrute.py names.txt example.com | ./bin/massdns -r resolvers.txt -t A -a -o -w results.txt -
 ```
 
 The files `names.txt` and `names_small.txt`, which have been copied from the [subbrute project](https://github.com/TheRook/subbrute), contain names of commonly used subdomains.
