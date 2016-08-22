@@ -430,31 +430,37 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     {
         context->module.handle_response(context, packet);
     }
-    else if (LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
-    {
-        fprintf(stderr, "ABORT: output packet status not OK \n");
-        fprintf(stdout, "ABORT: output packet status not OK \n");
-        abort();
-    }
-    char *packetstr = ldns_buffer_export2str(buf);
-    if (packetstr == NULL)
-    {
-        fprintf(stderr, "ABORT: packetstr == NULL \n");
-        fprintf(stdout, "ABORT: packetstr == NULL \n");
-        abort();
-    }
-    if (strcmp(packetstr, "") == 0)
-    {
-#ifdef DEBUG
-        fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
-#endif
-    }
     else
     {
-        fprintf(stdout, "%s", packetstr);
-        stats.answers++;
+        if (LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
+        {
+            fprintf(stderr, "ABORT: output packet status not OK \n");
+            fprintf(stdout, "ABORT: output packet status not OK \n");
+            abort();
+        }
+        else
+        {
+            char *packetstr = ldns_buffer_export2str(buf);
+            if (packetstr == NULL)
+            {
+                fprintf(stderr, "ABORT: packetstr == NULL \n");
+                fprintf(stdout, "ABORT: packetstr == NULL \n");
+                abort();
+            }
+            if (strcmp(packetstr, "") == 0)
+            {
+#ifdef DEBUG
+                fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
+#endif
+            }
+            else
+            {
+                fprintf(context->outfile, "%s", packetstr);
+                stats.answers++;
+            }
+            free(packetstr);
+        }
     }
-    free(packetstr);
     if (timediff(&now, &context->next_update) <= 0)
     {
         print_stats(context);
