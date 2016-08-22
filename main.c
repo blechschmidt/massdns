@@ -20,7 +20,8 @@
 #include "security.h"
 #include "string.h"
 #include "list.h"
-#include "hashmap.h"
+#include "massdns.h"
+#include "module.h"
 
 #ifdef DEBUG
 #include <sys/resource.h>
@@ -42,6 +43,7 @@ void print_help(char *file)
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same"
                     " domain. (Default: 200)\n"
+                    "  -m  --module           Load a shared module in order to handle packets.\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
                     "  -p  --progress         Show the progress and remaining time.\n"
@@ -50,6 +52,7 @@ void print_help(char *file)
                     "      --root             Allow running the program as root. Not recommended.\n"
                     "  -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 100000)\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
+                    "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "\n"
                     "Supported record types:\n"
                     "  A\n"
@@ -142,37 +145,6 @@ typedef struct lookup
     struct timeval next_lookup;
 } lookup_t;
 
-typedef struct lookup_context
-{
-    int sock;
-    buffer_t resolvers;
-    Hashmap *map;
-    struct timeval next_update;
-    size_t current_rate;
-    bool initial;
-    struct timeval start_time;
-    size_t total_domains;
-    struct timeval cooldown_time;
-    bool cooldown;
-    bool stdin;
-    struct cmd_args
-    {
-        bool root;
-        char *resolvers;
-        char *domains;
-        enum ldns_enum_rr_type record_types;
-        unsigned char resolve_count;
-        size_t hashmap_size;
-        unsigned int interval_ms;
-        bool no_authority;
-        bool only_responses;
-        bool additional;
-        bool norecurse;
-        bool show_progress;
-        bool quiet;
-    } cmd_args;
-} lookup_context_t;
-
 // http://www.cse.yorku.ca/~oz/hash.html
 unsigned long djb2(unsigned char *str)
 {
@@ -195,7 +167,8 @@ int hash_string(void *str)
     return (int) djb2((unsigned char *) str);
 }
 
-ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct sockaddr_storage sa, lookup_context_t* context)
+ldns_status
+output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct sockaddr_storage sa, massdns_context_t *context)
 {
     const ldns_output_format *fmt = ldns_output_format_nocomments;
     uint16_t i;
@@ -203,8 +176,8 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
 
     time_t now = time(NULL);
     char nsbuffer[INET6_ADDRSTRLEN];
-    char* ip_prefix = "";
-    char* ip_suffix = "";
+    char *ip_prefix = "";
+    char *ip_suffix = "";
     switch (((struct sockaddr *) &sa)->sa_family)
     {
         case AF_INET:
@@ -221,7 +194,7 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
 
     if (!pkt)
     {
-        if(0 > ldns_buffer_printf(output, ""))
+        if (0 > ldns_buffer_printf(output, ""))
         {
             fprintf(stdout, "ABORT: some ldns buffer printf fail \n");
             abort();
@@ -229,15 +202,16 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
         return LDNS_STATUS_OK;
     }
 
-    if(!context->cmd_args.only_responses)
+    if (!context->cmd_args.only_responses)
     {
-		char* rcode_str = ldns_pkt_rcode2str(ldns_pkt_get_rcode(pkt));
-        if(0 > ldns_buffer_printf(output, "%s%s%s:%u %ld %s ", ip_prefix, nsbuffer, ip_suffix, ntohs(((struct sockaddr_in *) &sa)->sin_port), now, rcode_str))
+        char *rcode_str = ldns_pkt_rcode2str(ldns_pkt_get_rcode(pkt));
+        if (0 > ldns_buffer_printf(output, "%s%s%s:%u %ld %s ", ip_prefix, nsbuffer, ip_suffix,
+                                   ntohs(((struct sockaddr_in *) &sa)->sin_port), now, rcode_str))
         {
             fprintf(stdout, "ABORT: another ldns printf buffer fail \n");
             abort();
         }
-		free(rcode_str);
+        free(rcode_str);
         for (i = 0; i < ldns_pkt_qdcount(pkt); i++)
         {
             status = ldns_rr2buffer_str_fmt(output, fmt, ldns_rr_list_rr(ldns_pkt_question(pkt), i));
@@ -252,9 +226,9 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
     {
         for (i = 0; i < ldns_pkt_ancount(pkt); i++)
         {
-            if(!context->cmd_args.only_responses)
+            if (!context->cmd_args.only_responses)
             {
-                if(0 > ldns_buffer_printf(output, "\t"))
+                if (0 > ldns_buffer_printf(output, "\t"))
                 {
                     fprintf(stdout, "ABORT: yet another ldns printf buffer fail \n");
                     abort();
@@ -267,16 +241,16 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
             }
 
         }
-        if(!context->cmd_args.no_authority)
+        if (!context->cmd_args.no_authority)
         {
-            if(0 > ldns_buffer_printf(output, "\n"))
+            if (0 > ldns_buffer_printf(output, "\n"))
             {
-              fprintf(stdout, "ABORT: yet another ldns printf buffer fail #10 \n");
-              abort();
+                fprintf(stdout, "ABORT: yet another ldns printf buffer fail #10 \n");
+                abort();
             }
             for (i = 0; i < ldns_pkt_nscount(pkt); i++)
             {
-                if(!context->cmd_args.only_responses)
+                if (!context->cmd_args.only_responses)
                 {
                     ldns_buffer_printf(output, "\t");
                 }
@@ -287,11 +261,11 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
                 }
             }
         }
-        if(context->cmd_args.additional)
+        if (context->cmd_args.additional)
         {
             for (i = 0; i < ldns_pkt_arcount(pkt); i++)
             {
-                if(!context->cmd_args.only_responses)
+                if (!context->cmd_args.only_responses)
                 {
                     ldns_buffer_printf(output, "\t");
                 }
@@ -310,9 +284,10 @@ ldns_status output_packet(ldns_buffer *output, const ldns_pkt *pkt, struct socka
     return status;
 }
 
-void print_stats(lookup_context_t *context)
+void print_stats(massdns_context_t *context)
 {
-    if(context->cmd_args.quiet) return;
+    if (context->cmd_args.quiet)
+    { return; }
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
                    stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
     struct timeval now;
@@ -321,14 +296,16 @@ void print_stats(lookup_context_t *context)
     context->next_update.tv_sec += 1;
     long elapsed = timediff(&context->start_time, &now) / 1000;
     long estimated = 0;
-    if(total != 0 && !context->initial)
+    if (total != 0 && !context->initial)
     {
-        estimated = elapsed * ((long)context->total_domains) / ((long)total) - elapsed + context->cmd_args.interval_ms * context->cmd_args.resolve_count / 1000;
+        estimated = elapsed * ((long) context->total_domains) / ((long) total) - elapsed +
+                    context->cmd_args.interval_ms * context->cmd_args.resolve_count / 1000;
     }
-    if(context->cooldown)
+    if (context->cooldown)
     {
-        estimated = (context->cmd_args.interval_ms * context->cmd_args.resolve_count - timediff(&context->cooldown_time, &now)) / 1000 + 1;
-        if(estimated < 0)
+        estimated = (context->cmd_args.interval_ms * context->cmd_args.resolve_count -
+                     timediff(&context->cooldown_time, &now)) / 1000 + 1;
+        if (estimated < 0)
         {
             estimated = 0;
         }
@@ -336,22 +313,27 @@ void print_stats(lookup_context_t *context)
     FILE *print = stderr;
     if (!context->initial)
     {
-        if(context->cmd_args.show_progress)
+        if (context->cmd_args.show_progress)
         {
             fprintf(print, "\033[F\033[F");
         }
-        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
+        fprintf(print,
+                "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
     }
     else
     {
         context->initial = false;
     }
-    fprintf(print, "Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
-    fprintf(print, "Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
-    fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr, total == 0 ? 0 : (float) stats.formerr / total * 100);
+    fprintf(print, "Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers,
+            total == 0 ? 0 : (float) stats.answers / total * 100);
+    fprintf(print, "Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr,
+            total == 0 ? 0 : (float) stats.noerr / total * 100);
+    fprintf(print, "Format errors: %zu (%.2f%%)\n", stats.formerr,
+            total == 0 ? 0 : (float) stats.formerr / total * 100);
     fprintf(print, "SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
     fprintf(print, "NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
-    fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
+    fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout,
+            total == 0 ? 0 : (float) stats.timeout / (total + stats.timeout * 100));
     fprintf(print, "\n");
     fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
@@ -361,16 +343,18 @@ void print_stats(lookup_context_t *context)
     fprintf(print, "Current rate: %zu pps\n", context->current_rate);
     fprintf(print, "Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
     fprintf(print, "Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60, elapsed % 60);
-    if(context->cmd_args.show_progress)
+    if (context->cmd_args.show_progress)
     {
-        fprintf(print, "Estimated time left: %02ld h %02ld min %02ld sec\n", estimated / 3600, (estimated / 60) % 60, estimated % 60);
-        fprintf(print, "Progress: %.2f%%\n", context->total_domains == 0 ? 0: (float) total / context->total_domains * 100);
+        fprintf(print, "Estimated time left: %02ld h %02ld min %02ld sec\n", estimated / 3600, (estimated / 60) % 60,
+                estimated % 60);
+        fprintf(print, "Progress: %.2f%%\n",
+                context->total_domains == 0 ? 0 : (float) total / context->total_domains * 100);
     }
     fflush(print);
     context->current_rate = 0;
 }
 
-void print_stats_final(lookup_context_t *context)
+void print_stats_final(massdns_context_t *context)
 {
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
                    stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
@@ -378,20 +362,28 @@ void print_stats_final(lookup_context_t *context)
     struct timeval now;
     gettimeofday(&now, NULL);
     long elapsed = timediff(&context->start_time, &now) / 1000;
-    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers, total == 0 ? 0 : (float) stats.answers / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr, total == 0 ? 0 : (float) stats.noerr / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail, total == 0 ? 0 : (float) stats.servfail / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout, total == 0 ? 0 : (float) stats.timeout / (total+stats.timeout * 100));
+    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers,
+            total == 0 ? 0 : (float) stats.answers / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr,
+            total == 0 ? 0 : (float) stats.noerr / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail,
+            total == 0 ? 0 : (float) stats.servfail / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain,
+            total == 0 ? 0 : (float) stats.nxdomain / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout,
+            total == 0 ? 0 : (float) stats.timeout / (total + stats.timeout * 100));
     fprintf(print, "\n");
-    fprintf(print, "DEBUG: FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused,
+            total == 0 ? 0 : (float) stats.refused / total * 100);
+    fprintf(print, "DEBUG: FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch,
+            total == 0 ? 0 : (float) stats.mismatch / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: Total queries sent: %zu \n", stats.qsent);
     fprintf(print, "DEBUG: FINALSTATS: Total received: %zu \n", total);
     fprintf(print, "DEBUG: FINALSTATS: config:  hashtable %zu, timeout %u seconds, retries %u \n",
-    	context->cmd_args.hashmap_size, context->cmd_args.interval_ms/1000,  context->cmd_args.resolve_count);
+            context->cmd_args.hashmap_size, context->cmd_args.interval_ms / 1000, context->cmd_args.resolve_count);
     fprintf(print, "DEBUG: FINALSTATS: Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
-    fprintf(print, "DEBUG: FINALSTATS: Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60, elapsed % 60);
+    fprintf(print, "DEBUG: FINALSTATS: Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60,
+            elapsed % 60);
     fflush(print);
 }
 
@@ -403,14 +395,14 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     }
     struct timeval now;
     gettimeofday(&now, NULL);
-    lookup_context_t *context = (lookup_context_t *) ctx;
+    massdns_context_t *context = (massdns_context_t *) ctx;
     ldns_pkt_rcode response_code = ldns_pkt_get_rcode(packet);
     ldns_rr_list l = ldns_pkt_question(packet)[0];
     ldns_rr *question = ldns_rr_list_rr(&l, 0);
-    ldns_rdf* owner = ldns_rr_owner(question);
-    char* name = ldns_rdf2str(owner);
+    ldns_rdf *owner = ldns_rr_owner(question);
+    char *name = ldns_rdf2str(owner);
     size_t name_len = strlen(name);
-    if(name_len > 0 && name[name_len - 1] == '.')
+    if (name_len > 0 && name[name_len - 1] == '.')
     {
         name[name_len - 1] = 0;
     }
@@ -420,46 +412,54 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     {
         stats.mismatch++;
         // not neccessarily a problem, sometimes we receive duplicate answers
+#ifdef DEBUG
         fprintf(stdout, "ERROR: MISMATCH: Received answer for domain not in hashmap: \"%s\" \n", name);
-		free(name);
+#endif
+        free(name);
         return;
     }
     free(name);
-	ldns_buffer *buf = ldns_buffer_new(LDNS_MAX_PACKETLEN);
-	if(buf == NULL)
-	{
-		fprintf(stderr, "ABORT: buffer == NULL \n");
-		fprintf(stdout, "ABORT: buffer == NULL \n");
-		abort();
-	}
-	if(LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
-	{
-	  fprintf(stderr, "ABORT: output packet status not OK \n");
-	  fprintf(stderr, "ABORT: output packet status not OK \n");
-		abort();
-	}
-	char* packetstr = ldns_buffer_export2str(buf);
-	if(packetstr == NULL)
-	{
-	  fprintf(stderr, "ABORT: packetstr == NULL \n");
-	  fprintf(stderr, "ABORT: packetstr == NULL \n");
-		abort();
-	}
-	if (strcmp(packetstr, "") == 0)
-	{
+    ldns_buffer *buf = ldns_buffer_new(LDNS_MAX_PACKETLEN);
+    if (buf == NULL)
+    {
+        fprintf(stderr, "ABORT: buffer == NULL \n");
+        fprintf(stdout, "ABORT: buffer == NULL \n");
+        abort();
+    }
+    if(context->module.handle_response)
+    {
+        context->module.handle_response(context, packet);
+    }
+    else if (LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
+    {
+        fprintf(stderr, "ABORT: output packet status not OK \n");
+        fprintf(stdout, "ABORT: output packet status not OK \n");
+        abort();
+    }
+    char *packetstr = ldns_buffer_export2str(buf);
+    if (packetstr == NULL)
+    {
+        fprintf(stderr, "ABORT: packetstr == NULL \n");
+        fprintf(stdout, "ABORT: packetstr == NULL \n");
+        abort();
+    }
+    if (strcmp(packetstr, "") == 0)
+    {
 #ifdef DEBUG
-		fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
+        fprintf(stdout, "DEBUG: empty reply for %s\n", lookup->domain);
 #endif
-	} else {
-		fprintf(stdout, "%s", packetstr);
-		stats.answers++;
-	}
-	free(packetstr);
-	if (timediff(&now, &context->next_update) <= 0)
-	{
-		print_stats(context);
-	}
-	ldns_buffer_free(buf);
+    }
+    else
+    {
+        fprintf(stdout, "%s", packetstr);
+        stats.answers++;
+    }
+    free(packetstr);
+    if (timediff(&now, &context->next_update) <= 0)
+    {
+        print_stats(context);
+    }
+    ldns_buffer_free(buf);
     switch (response_code)
     {
         case LDNS_RCODE_NOERROR:
@@ -481,20 +481,20 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
             stats.refused++;
             break;
         case LDNS_RCODE_YXDOMAIN:
-           stats.yxdomain++;
-           break;
-      case LDNS_RCODE_YXRRSET:
-          stats.yxrrset++;
-          break;
-      case LDNS_RCODE_NXRRSET:
-          stats.nxrrset++;
-          break;
-      case LDNS_RCODE_NOTAUTH:
-          stats.notauth++;
-          break;
-      case LDNS_RCODE_NOTZONE:
-          stats.notzone++;
-          break;
+            stats.yxdomain++;
+            break;
+        case LDNS_RCODE_YXRRSET:
+            stats.yxrrset++;
+            break;
+        case LDNS_RCODE_NXRRSET:
+            stats.nxrrset++;
+            break;
+        case LDNS_RCODE_NOTAUTH:
+            stats.notauth++;
+            break;
+        case LDNS_RCODE_NOTZONE:
+            stats.notzone++;
+            break;
         default:
             stats.other++;
             break;
@@ -518,7 +518,7 @@ int massdns_receive_packet(int socket, void (*handle_packet)(ldns_pkt *, struct 
     if (num_received > 0)
     {
         ldns_pkt *packet;
-        if(LDNS_STATUS_OK != ldns_wire2pkt(&packet, recvbuf, (size_t)num_received))
+        if (LDNS_STATUS_OK != ldns_wire2pkt(&packet, recvbuf, (size_t) num_received))
         {
             // We have received a packet with an invalid format
             return 1;
@@ -539,25 +539,25 @@ struct sockaddr_storage *str_to_addr(char *str)
         ip4addr->sin_port = htons(53);
         ip4addr->sin_family = AF_INET;
         free(ip6addr);
-        return (struct sockaddr_storage *)ip4addr;
+        return (struct sockaddr_storage *) ip4addr;
     }
     else
     {
-        char* colon = strstr(str, ":");
-        if(colon)
+        char *colon = strstr(str, ":");
+        if (colon)
         {
             *colon = 0;
             if (inet_pton(AF_INET, str, &ip4addr->sin_addr) == 1)
             {
                 int port = atoi(colon + 1);
-                if(port == 0 || port > 0xFFFF)
+                if (port == 0 || port > 0xFFFF)
                 {
                     goto str_to_addr_error;
                 }
-                ip4addr->sin_port = htons((uint16_t)port);
+                ip4addr->sin_port = htons((uint16_t) port);
                 ip4addr->sin_family = AF_INET;
                 free(ip6addr);
-                return (struct sockaddr_storage *)ip4addr;
+                return (struct sockaddr_storage *) ip4addr;
             }
         }
         str_to_addr_error:
@@ -610,7 +610,7 @@ sockaddr_in_t *massdns_get_resolver(size_t index, buffer_t *resolvers)
 bool handle_domain(void *k, void *l, void *c)
 {
     lookup_t *lookup = (lookup_t *) l;
-    lookup_context_t *context = (lookup_context_t *) c;
+    massdns_context_t *context = (massdns_context_t *) c;
     struct timeval now;
     gettimeofday(&now, NULL);
     if (timediff(&now, &lookup->next_lookup) < 0)
@@ -621,25 +621,26 @@ bool handle_domain(void *k, void *l, void *c)
             query_flags |= LDNS_RD;
         }
         ldns_pkt *packet;
-        if(LDNS_STATUS_OK != ldns_pkt_query_new_frm_str(&packet, lookup->domain, context->cmd_args.record_types, LDNS_RR_CLASS_IN,
-                                   query_flags))
+        if (LDNS_STATUS_OK !=
+            ldns_pkt_query_new_frm_str(&packet, lookup->domain, context->cmd_args.record_types, LDNS_RR_CLASS_IN,
+                                       query_flags))
         {
 #ifdef DEBUG
-          fprintf(stdout, "ERROR: new query from string fail for domain %s , skipping... \n", lookup->domain);
+            fprintf(stdout, "ERROR: new query from string fail for domain %s , skipping... \n", lookup->domain);
 #endif
-          // TODO: I do not think we have to free *packet, validate
-          hashmapRemove(context->map, lookup->domain);
-          return true;
+            // TODO: I do not think we have to free *packet, validate
+            hashmapRemove(context->map, lookup->domain);
+            return true;
         }
         ldns_pkt_set_id(packet, lookup->transaction);
         uint8_t *buf = NULL;
         size_t packet_size = 0;
-        if(LDNS_STATUS_OK != ldns_pkt2wire(&buf, packet, &packet_size))
+        if (LDNS_STATUS_OK != ldns_pkt2wire(&buf, packet, &packet_size))
         {
 #ifdef DEBUG
-          fprintf(stdout, "ERROR: pkt2wire fail, treating as timeout! \n");
+            fprintf(stdout, "ERROR: pkt2wire fail, treating as timeout! \n");
 #endif
-          goto TIMEOUT;
+            goto TIMEOUT;
         }
         ldns_pkt_free(packet);
         packet = NULL;
@@ -654,8 +655,8 @@ bool handle_domain(void *k, void *l, void *c)
         }
         stats.qsent++;
         free(buf);
-        TIMEOUT: ; // label requires statement, hence empty statement
-        unsigned int timeout_random_scale=2; // 2 -> 50%
+        TIMEOUT:; // label requires statement, hence empty statement
+        unsigned int timeout_random_scale = 2; // 2 -> 50%
         long addusec = context->cmd_args.interval_ms * 1000 / timeout_random_scale;
         addusec += rand() % (addusec / timeout_random_scale); // Avoid congestion by adding some randomness
         //addusec += rand() % (addusec / 5); // Avoid congestion by adding some randomness
@@ -684,7 +685,7 @@ bool cmp_lookup(void *lookup1, void *lookup2)
     return strcmp((char *) lookup1, (char *) lookup2) == 0;
 }
 
-void massdns_scan(lookup_context_t *context)
+void massdns_scan(massdns_context_t *context)
 {
     memset(&stats, 0, sizeof(dns_stats_t));
     size_t line_buflen = 4096;
@@ -714,9 +715,11 @@ void massdns_scan(lookup_context_t *context)
         exit(1);
     }
     FILE *f;
-    if(context->stdin){
-    	context->total_domains=1; // this is only for stats, so a false value is ok
-    } else if(context->cmd_args.show_progress)
+    if (context->stdin)
+    {
+        context->total_domains = 1; // this is only for stats, so a false value is ok
+    }
+    else if (context->cmd_args.show_progress)
     {
         f = fopen(context->cmd_args.domains, "r");
         if (f == NULL)
@@ -724,7 +727,7 @@ void massdns_scan(lookup_context_t *context)
             perror("Failed to open domain file");
             exit(1);
         }
-        while(!feof(f))
+        while (!feof(f))
         {
             if (0 <= getline(&line, &line_buflen, f))
             {
@@ -738,26 +741,35 @@ void massdns_scan(lookup_context_t *context)
         }
         fclose(f);
     }
-    if(!context->stdin)
+    if (!context->stdin)
     {
-	    f = fopen(context->cmd_args.domains, "r");
-	    if (f == NULL)
-	    {
-	        perror("Failed to open domain file");
-	        exit(1);
-	    }
-    } else {
-    	f = stdin;
+        f = fopen(context->cmd_args.domains, "r");
+        if (f == NULL)
+        {
+            perror("Failed to open domain file");
+            exit(1);
+        }
+    }
+    else
+    {
+        f = stdin;
     }
     if (geteuid() == 0)
     {
-        if(!context-> cmd_args.quiet) fprintf(stderr, "You have started the program with root privileges.\n");
+        if (!context->cmd_args.quiet)
+        {
+            fprintf(stderr, "You have started the program with root privileges.\n");
+        }
         struct passwd *nobody = getpwnam(UNPRIVILEGED_USER);
         if (!context->cmd_args.root)
         {
             if (nobody && setuid(nobody->pw_uid) == 0)
             {
-                if(!context->cmd_args.quiet) fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n", UNPRIVILEGED_USER);
+                if (!context->cmd_args.quiet)
+                {
+                    fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n",
+                            UNPRIVILEGED_USER);
+                }
             }
             else if (!context->cmd_args.root)
             {
@@ -787,7 +799,7 @@ void massdns_scan(lookup_context_t *context)
     gettimeofday(&context->start_time, NULL);
     context->next_update = context->start_time;
 
-    if(context->resolvers.len == 0)
+    if (context->resolvers.len == 0)
     {
         fprintf(stderr, "No valid resolver supplied. Exiting.\n");
         exit(1);
@@ -802,7 +814,7 @@ void massdns_scan(lookup_context_t *context)
                 trim_end(line);
                 line_len = strlen(line);
                 strtolower(line);
-                if(strcmp(line, "") == 0)
+                if (strcmp(line, "") == 0)
                 {
                     continue;
                 }
@@ -831,7 +843,7 @@ void massdns_scan(lookup_context_t *context)
 
             }
         }
-        if(!context->cooldown && hashmapSize(context->map) < context->cmd_args.hashmap_size)
+        if (!context->cooldown && hashmapSize(context->map) < context->cmd_args.hashmap_size)
         {
             context->cooldown = true;
             gettimeofday(&context->cooldown_time, NULL);
@@ -856,6 +868,7 @@ void massdns_scan(lookup_context_t *context)
     context->map = NULL;
     fclose(f);
     fclose(randomness);
+    fclose(context->outfile);
 #ifdef DEBUG
     print_stats_final(context);
 #endif
@@ -873,8 +886,8 @@ int main(int argc, char **argv)
         print_help(argc > 0 ? argv[0] : "massdns");
         return 1;
     }
-    lookup_context_t ctx;
-    lookup_context_t *context = &ctx;
+    massdns_context_t ctx;
+    massdns_context_t *context = &ctx;
     memset(&context->cmd_args, 0, sizeof(context->cmd_args));
     context->cmd_args.resolve_count = 50;
     context->cmd_args.hashmap_size = 100000;
@@ -882,6 +895,8 @@ int main(int argc, char **argv)
     context->cooldown = false;
     context->stdin = false;
     context->total_domains = 0;
+    context->outfile = stdout;
+    module_init(&context->module);
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
@@ -906,6 +921,43 @@ int main(int argc, char **argv)
                 fprintf(stderr, "Resolvers may only be supplied once.\n\n");
                 print_help(argv[0]);
                 return 1;
+            }
+        }
+        else if (strcmp(argv[i], "--module") == 0 || strcmp(argv[i], "-m") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "The argument -m requires a valid module.\n\n");
+                print_help(argv[0]);
+                return 1;
+            }
+            if(!module_load(&context->module, argv[++i]))
+            {
+                fprintf(stderr, "%s", dlerror());
+                return 1;
+            }
+        }
+        else if (strcmp(argv[i], "--outfile") == 0 || strcmp(argv[i], "-w") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "The argument -w requires a valid output file.\n\n");
+                print_help(argv[0]);
+                return 1;
+            }
+            char *filename = argv[++i];
+            if(strcmp(filename, "-") == 0)
+            {
+                context->outfile = stdout;
+            }
+            else
+            {
+                context->outfile = fopen(filename, "w");
+                if(!context->outfile)
+                {
+                    perror("Failed to open output file");
+                    return 1;
+                }
             }
         }
         else if (strcmp(argv[i], "--types") == 0 || strcmp(argv[i], "-t") == 0)
@@ -992,14 +1044,14 @@ int main(int argc, char **argv)
         {
             if (context->cmd_args.domains == NULL)
             {
-            	if (strcmp(argv[i], "-") == 0)
-            	{
-                if(!context->cmd_args.quiet)
+                if (strcmp(argv[i], "-") == 0)
                 {
-                fprintf(stderr, "Reading domain list from stdin.\n");
+                    if (!context->cmd_args.quiet)
+                    {
+                        fprintf(stderr, "Reading domain list from stdin.\n");
+                    }
+                    context->stdin = true;
                 }
-            		context->stdin=true;
-            	}
                 context->cmd_args.domains = argv[i];
             }
             else
@@ -1026,6 +1078,7 @@ int main(int argc, char **argv)
         print_help(argv[0]);
         return 1;
     }
+
     massdns_scan(context);
     return 0;
 }

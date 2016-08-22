@@ -98,5 +98,3 @@ The privilege drop can be circumvented using the `--root` argument which is not 
 - Implement bandwidth limits
 - Employ cross-resolver checks to detect DNS poisoning and DNS spam (e.g. [Level 3 DNS hijacking](https://web.archive.org/web/20140302064622/http://james.bertelson.me/blog/2014/01/level-3-are-now-hijacking-failed-dns-requests-for-ad-revenue-on-4-2-2-x/))
 - Implement IO-multiplexing to prevent 100% usage of a single CPU core
-- Allow for the integration of dynamic libraries
-- Implement additional (binary) output formats
