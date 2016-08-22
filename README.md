@@ -102,7 +102,7 @@ The privilege drop can be circumvented using the `--root` argument which is not 
 Also note that other branches than master should not be used in production at all.
 
 ## Development
-MassDNS support the development of minimalistic custom modules. An example module supporting binary output can be found within the folder `modules`.
+MassDNS supports the development of minimalistic custom modules. An example module supporting binary output can be found within the folder `modules`.
 The example module has to be built separately by running `make`.
 Please note that the module interfaces are not stable yet and are subject to change during further development of MassDNS.
 
