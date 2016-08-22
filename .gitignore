@@ -1,8 +1,12 @@
-/.idea/
+.idea/
 bin/
-/CMakeLists.txt
 *.bin
 vgcore.*
 core
 *.pcap
 *.cap
+/resolver/Makefile
+/resolver/resolver
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
