@@ -71,44 +71,43 @@ void print_help(char *file)
 
 int record_from_str(char *str)
 {
-    strtolower(str);
-    if (strcmp(str, "a") == 0)
+    if (strcasecmp(str, "a") == 0)
     {
         return LDNS_RR_TYPE_A;
     }
-    if (strcmp(str, "aaaa") == 0)
+    if (strcasecmp(str, "aaaa") == 0)
     {
         return LDNS_RR_TYPE_AAAA;
     }
-    if (strcmp(str, "cname") == 0)
+    if (strcasecmp(str, "cname") == 0)
     {
         return LDNS_RR_TYPE_CNAME;
     }
-    if (strcmp(str, "dname") == 0)
+    if (strcasecmp(str, "dname") == 0)
     {
         return LDNS_RR_TYPE_DNAME;
     }
-    if (strcmp(str, "mx") == 0)
+    if (strcasecmp(str, "mx") == 0)
     {
         return LDNS_RR_TYPE_MX;
     }
-    if (strcmp(str, "ns") == 0)
+    if (strcasecmp(str, "ns") == 0)
     {
         return LDNS_RR_TYPE_NS;
     }
-    if (strcmp(str, "ptr") == 0)
+    if (strcasecmp(str, "ptr") == 0)
     {
         return LDNS_RR_TYPE_PTR;
     }
-    if (strcmp(str, "txt") == 0)
+    if (strcasecmp(str, "txt") == 0)
     {
         return LDNS_RR_TYPE_TXT;
     }
-    if (strcmp(str, "soa") == 0)
+    if (strcasecmp(str, "soa") == 0)
     {
         return LDNS_RR_TYPE_SOA;
     }
-    if (strcmp(str, "any") == 0)
+    if (strcasecmp(str, "any") == 0)
     {
         return LDNS_RR_TYPE_ANY;
     }
@@ -688,7 +687,7 @@ bool handle_domain(void *k, void *l, void *c)
 
 bool cmp_lookup(void *lookup1, void *lookup2)
 {
-    return strcmp((char *) lookup1, (char *) lookup2) == 0;
+    return strcasecmp((char *) lookup1, (char *) lookup2) == 0;
 }
 
 void massdns_scan(massdns_context_t *context)
