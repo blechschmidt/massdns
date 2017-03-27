@@ -826,7 +826,7 @@ void massdns_scan(massdns_context_t *context)
                 if (line_len > 0 && line[line_len - 1] == '.')
                 {
                     // Remove trailing dot from FQDN
-                    line[line_len] = 0;
+                    line[line_len-1] = '\0';
                 }
                 lookup_t *lookup = hashmapGet(context->map, line);
                 if (lookup == NULL)
