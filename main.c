@@ -135,6 +135,7 @@ typedef struct dns_stats_t
 } dns_stats_t;
 
 dns_stats_t stats;
+unsigned int * timeout_stats;
 
 typedef struct lookup
 {
@@ -333,6 +334,10 @@ void print_stats(massdns_context_t *context)
     fprintf(print, "NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain, total == 0 ? 0 : (float) stats.nxdomain / total * 100);
     fprintf(print, "Final Timeout: %zu (%.2f%%)\n", stats.timeout,
             total == 0 ? 0 : (float) stats.timeout / (total + stats.timeout * 100));
+    fprintf(print, "Timeout Details: ");
+    for(int i=0;i<context->cmd_args.resolve_count;i++){
+      fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
+    }
     fprintf(print, "\n");
     fprintf(print, "Refused: %zu (%.2f%%)\n", stats.refused, total == 0 ? 0 : (float) stats.refused / total * 100);
     fprintf(print, "Mismatch: %zu (%.2f%%)\n", stats.mismatch, total == 0 ? 0 : (float) stats.mismatch / total * 100);
@@ -371,6 +376,10 @@ void print_stats_final(massdns_context_t *context)
             total == 0 ? 0 : (float) stats.nxdomain / total * 100);
     fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout,
             total == 0 ? 0 : (float) stats.timeout / (total + stats.timeout * 100));
+    fprintf(print, "DEBUG: FINALSTATS: Timeout Details: ");
+    for(int i=0;i<context->cmd_args.resolve_count;i++){
+      fprintf(print, "%u: %u (%.0f%%), ",i+1,timeout_stats[i],100*(float)timeout_stats[i]/timeout_stats[0]);
+    }
     fprintf(print, "\n");
     fprintf(print, "DEBUG: FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused,
             total == 0 ? 0 : (float) stats.refused / total * 100);
@@ -667,6 +676,7 @@ bool handle_domain(void *k, void *l, void *c)
         //addusec += rand() % (addusec / 5); // Avoid congestion by adding some randomness
         lookup->next_lookup.tv_usec = (now.tv_usec + addusec) % 1000000;
         lookup->next_lookup.tv_sec = now.tv_sec + (now.tv_usec + addusec) / 1000000;
+        timeout_stats[lookup->tries]++;
         lookup->tries++;
 #ifdef DEBUG
         fprintf(stdout, "DEBUG: TIMEOUT #%2u for domain %s.\n", lookup->tries, lookup->domain);
@@ -1083,6 +1093,8 @@ int main(int argc, char **argv)
         print_help(argv[0]);
         return 1;
     }
+    timeout_stats = malloc(sizeof(unsigned int)*context->cmd_args.resolve_count);
+    memset(timeout_stats,0,sizeof(unsigned int)*context->cmd_args.resolve_count);
 
     massdns_scan(context);
     return 0;
