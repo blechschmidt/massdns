@@ -47,6 +47,7 @@ void print_help(char *file)
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
                     "  -p  --progress         Show the progress and remaining time.\n"
+                    "      --finalstats       Write final stats to STDERR when done.\n"
                     "  -q  --quiet            Quiet mode.\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Allow running the program as root. Not recommended.\n"
@@ -357,31 +358,31 @@ void print_stats_final(massdns_context_t *context)
 {
     size_t total = stats.noerr + stats.formerr + stats.servfail + stats.nxdomain + stats.notimp + stats.refused +
                    stats.yxdomain + stats.yxrrset + stats.nxrrset + stats.notauth + stats.notzone + stats.other;
-    FILE *print = stdout;
+    FILE *print = stderr;
     struct timeval now;
     gettimeofday(&now, NULL);
     long elapsed = timediff(&context->start_time, &now) / 1000;
-    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers,
+    fprintf(print, "FINALSTATS: Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers,
             total == 0 ? 0 : (float) stats.answers / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr,
+    fprintf(print, "FINALSTATS: Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr,
             total == 0 ? 0 : (float) stats.noerr / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail,
+    fprintf(print, "FINALSTATS: SERVFAIL: %zu (%.2f%%)\n", stats.servfail,
             total == 0 ? 0 : (float) stats.servfail / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain,
+    fprintf(print, "FINALSTATS: NXDOMAIN: %zu (%.2f%%)\n", stats.nxdomain,
             total == 0 ? 0 : (float) stats.nxdomain / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout,
+    fprintf(print, "FINALSTATS: Final Timeout: %zu (%.2f%%)\nDEBUG: FINALSTATS: ", stats.timeout,
             total == 0 ? 0 : (float) stats.timeout / (total + stats.timeout * 100));
     fprintf(print, "\n");
-    fprintf(print, "DEBUG: FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused,
+    fprintf(print, "FINALSTATS: Refused: %zu (%.2f%%)\n", stats.refused,
             total == 0 ? 0 : (float) stats.refused / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch,
+    fprintf(print, "FINALSTATS: Mismatch: %zu (%.2f%%)\n", stats.mismatch,
             total == 0 ? 0 : (float) stats.mismatch / total * 100);
-    fprintf(print, "DEBUG: FINALSTATS: Total queries sent: %zu \n", stats.qsent);
-    fprintf(print, "DEBUG: FINALSTATS: Total received: %zu \n", total);
-    fprintf(print, "DEBUG: FINALSTATS: config:  hashtable %zu, timeout %u seconds, retries %u \n",
+    fprintf(print, "FINALSTATS: Total queries sent: %zu \n", stats.qsent);
+    fprintf(print, "FINALSTATS: Total received: %zu \n", total);
+    fprintf(print, "FINALSTATS: config:  hashtable %zu, timeout %u seconds, retries %u \n",
             context->cmd_args.hashmap_size, context->cmd_args.interval_ms / 1000, context->cmd_args.resolve_count);
-    fprintf(print, "DEBUG: FINALSTATS: Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
-    fprintf(print, "DEBUG: FINALSTATS: Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60,
+    fprintf(print, "FINALSTATS: Average rate: %zu pps\n", elapsed == 0 ? 0 : total / elapsed);
+    fprintf(print, "FINALSTATS: Elapsed: %02ld h %02ld min %02ld sec\n", elapsed / 3600, (elapsed / 60) % 60,
             elapsed % 60);
     fflush(print);
 }
@@ -869,14 +870,15 @@ void massdns_scan(massdns_context_t *context)
     free(context->resolvers.data);
     context->resolvers.data = NULL;
     print_stats(context);
+    if(context->cmd_args.finalstats)
+    {
+        print_stats_final(context);
+    }
     hashmapFree(context->map);
     context->map = NULL;
     fclose(f);
     fclose(randomness);
     fclose(context->outfile);
-#ifdef DEBUG
-    print_stats_final(context);
-#endif
 }
 
 int main(int argc, char **argv)
@@ -1010,6 +1012,10 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--progress") == 0 || strcmp(argv[i], "-p") == 0)
         {
             context->cmd_args.show_progress = true;
+        }
+        else if (strcmp(argv[i], "--finalstats") == 0)
+        {
+            context->cmd_args.finalstats = true;
         }
         else if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0)
         {

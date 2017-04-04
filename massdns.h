@@ -39,6 +39,7 @@ typedef struct massdns_context
         bool additional;
         bool norecurse;
         bool show_progress;
+        bool finalstats;
         bool quiet;
     } cmd_args;
 
