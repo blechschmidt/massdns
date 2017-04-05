@@ -64,7 +64,9 @@ void print_help(char *file)
                     "  NS\n"
                     "  PTR\n"
                     "  SOA\n"
-                    "  TXT\n",
+                    "  TXT\n"
+                    "  CAA\n"
+                    "  TLSA\n",
             file
     );
 }
