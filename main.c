@@ -111,6 +111,14 @@ int record_from_str(char *str)
     {
         return LDNS_RR_TYPE_ANY;
     }
+    if (strcasecmp(str, "tlsa") == 0)
+    {
+        return LDNS_RR_TYPE_TLSA;
+    }
+    if (strcasecmp(str, "caa") == 0)
+    {
+        return LDNS_RR_TYPE_CAA;
+    }
     return 0;
 }
 
