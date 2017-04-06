@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <ldns/rbtree.h>
 #include <ldns/packet.h>
 #include <ldns/host2wire.h>
 #include <ldns/wire2host.h>
