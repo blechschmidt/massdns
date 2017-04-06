@@ -443,9 +443,13 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
     {
         if (LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
         {
-            fprintf(stderr, "ABORT: output packet status not OK \n");
-            fprintf(stdout, "ABORT: output packet status not OK \n");
-            abort();
+            // fprintf(stderr, "ABORT: output packet status not OK \n");
+            // fprintf(stdout, "ABORT: output packet status not OK \n");
+            ldns_buffer_free(buf);
+            fprintf(stderr, "CRITICAL: output packet status not OK for domain %s \n", lookup->domain);
+            fprintf(stdout, "CRITICAL: output packet status not OK for domain %s \n", lookup->domain);
+            stats.formerr++;
+            return;
         }
         else
         {
