@@ -448,7 +448,24 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
             ldns_buffer_free(buf);
             fprintf(stderr, "CRITICAL: output packet status not OK for domain %s \n", lookup->domain);
             fprintf(stdout, "CRITICAL: output packet status not OK for domain %s \n", lookup->domain);
+            
+            // log the offending domain
+            FILE *f = fopen("uncaught_formerr.txt", "a");
+            if (f == NULL)
+            {
+                printf("Error opening uncaught_formerr.txt!\n");
+                exit(1);
+            }
+            fprintf(f, "%s\n", lookup->domain);
+            fclose(f);
+
             stats.formerr++;
+
+            // do not try again
+            hashmapRemove(context->map, lookup->domain);
+            free(lookup->domain);
+            free(lookup);
+
             return;
         }
         else
