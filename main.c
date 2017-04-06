@@ -1093,7 +1093,7 @@ int main(int argc, char **argv)
         print_help(argv[0]);
         return 1;
     }
-    timeout_stats = malloc(sizeof(unsigned int)*context->cmd_args.resolve_count);
+    timeout_stats = safe_malloc(sizeof(unsigned int)*context->cmd_args.resolve_count);
     memset(timeout_stats,0,sizeof(unsigned int)*context->cmd_args.resolve_count);
 
     massdns_scan(context);
