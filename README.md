@@ -43,6 +43,8 @@ Supported record types:
   PTR
   SOA
   TXT
+  CAA
+  TLSA
 ```
 By default, MassDNS will print status information on standard error, results are written to stdout.
 
