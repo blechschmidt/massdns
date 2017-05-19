@@ -21,6 +21,7 @@ Usage: ./bin/massdns [options] domainlist (- for stdin)
   -e  --additional       Include response records within the additional section.
   -h  --help             Show this help.
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same domain. (Default: 200)
+  -l  --error-log        Error log file path. (Default: /dev/stderr)
   -m  --module           Load a shared module in order to handle packets.
   -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
   -o  --only-responses   Do not output DNS questions.

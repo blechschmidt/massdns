@@ -44,7 +44,7 @@ void print_help(char *file)
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same"
                     " domain. (Default: 200)\n"
-                    "  -l  --error-log        Error log file path. Log is opened before privilege drop."
+                    "  -l  --error-log        Error log file path. (Default: /dev/stderr)"
                     "  -m  --module           Load a shared module in order to handle packets.\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
