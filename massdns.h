@@ -25,6 +25,7 @@ typedef struct massdns_context
     bool cooldown;
     bool stdin;
     FILE *outfile;
+    FILE *logfile;
     struct cmd_args
     {
         bool root;
