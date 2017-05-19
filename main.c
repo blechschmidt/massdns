@@ -44,6 +44,7 @@ void print_help(char *file)
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same"
                     " domain. (Default: 200)\n"
+                    "  -l  --error-log        Error log file path. Log is opened before privilege drop."
                     "  -m  --module           Load a shared module in order to handle packets.\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
@@ -455,17 +456,10 @@ void massdns_handle_packet(ldns_pkt *packet, struct sockaddr_storage ns, void *c
         if (LDNS_STATUS_OK != output_packet(buf, packet, ns, context))
         {
             ldns_buffer_free(buf);
-            fprintf(stderr, "CRITICAL: output packet status not OK for domain %s -- check /tmp/massdns_uncaught_formerr.txt \n", lookup->domain);
-            fprintf(stdout, "CRITICAL: output packet status not OK for domain %s -- check /tmp/massdns_uncaught_formerr.txt \n", lookup->domain);
+            fprintf(stderr, "CRITICAL: output packet status not OK for domain %s -- check log file\n", lookup->domain);
+            fprintf(stdout, "CRITICAL: output packet status not OK for domain %s -- check log file\n", lookup->domain);
 
-            // log the offending domain to /tmp, as massdns does user privilege drop
-            FILE *f = fopen("/tmp/massdns_uncaught_formerr.txt", "a");
-            if (f == NULL)
-            {
-                printf("Error opening /tmp/massdns_uncaught_formerr.txt!\n");
-            }
-            fprintf(f, "%d,%s\n", (int)now.tv_sec, lookup->domain);
-            fclose(f);
+            fprintf(context->logfile, "ERR_STATUS,%d,%s\n", (int)now.tv_sec, lookup->domain);
 
             stats.formerr++;
 
@@ -918,6 +912,7 @@ void massdns_scan(massdns_context_t *context)
     fclose(f);
     fclose(randomness);
     fclose(context->outfile);
+    fclose(context->logfile);
 }
 
 int main(int argc, char **argv)
@@ -1002,6 +997,29 @@ int main(int argc, char **argv)
                 if(!context->outfile)
                 {
                     perror("Failed to open output file");
+                    return 1;
+                }
+            }
+        }
+        else if (strcmp(argv[i], "--error-log") == 0 || strcmp(argv[i], "-l") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "The argument -l requires a valid log file.\n\n");
+                print_help(argv[0]);
+                return 1;
+            }
+            char *filename = argv[++i];
+            if(strcmp(filename, "-") == 0)
+            {
+                context->logfile = stderr;
+            }
+            else
+            {
+                context->logfile = fopen(filename, "w");
+                if(!context->logfile)
+                {
+                    perror("Failed to open log file");
                     return 1;
                 }
             }
