@@ -89,13 +89,18 @@ $ ./ptr.py | ./bin/massdns -r resolvers.txt -t PTR -w ptr.txt -
 Please note that the labels within `in-addr.arpa` are reversed. In order to resolve the domain name of `1.2.3.4`, MassDNS expects `4.3.2.1.in-addr.arpa` as input query name.
 As a consequence, the Python script does not resolve the records in an ascending order which is an advantage because sudden heavy spikes at the name servers of IPv4 subnets are avoided.
 
-#### Brute-forcing subdomains
+#### Reconnaissance by brute-forcing subdomains
 Similar to [subbrute](https://github.com/TheRook/subbrute), MassDNS allows you to brute force subdomains using the included `subbrute.py` script:
 ```
 $ ./subbrute.py names.txt example.com | ./bin/massdns -r resolvers.txt -t A -a -o -w results.txt -
 ```
 
-The files `names.txt` and `names_small.txt`, which have been copied from the [subbrute project](https://github.com/TheRook/subbrute), contain names of commonly used subdomains.
+As an additional method of reconnaissance, the `ct.py` script extracts subdomains from certificate transparency logs by scraping the data from [crt.sh](https://crt.sh):
+```
+$ ./ct.py example.com | ./bin/massdns -r resolvers.txt -t A -a -o -w results.txt -
+```
+
+The files `names.txt` and `names_small.txt`, which have been copied from the [subbrute project](https://github.com/TheRook/subbrute), contain names of commonly used subdomains. Also consider using [Jason Haddix' subdomain compilation](https://gist.github.com/jhaddix/86a06c5dc309d08580a018c66354a056/raw/f58e82c9abfa46a932eb92edbe6b18214141439b/all.txt) with over 1,000,000 names.
 
 ## Screenshots
 ![Screenshot](https://www.cysec.biz/projects/massdns/screenshots/screenshot1.png)
