@@ -44,6 +44,8 @@ typedef struct massdns_context
         bool show_progress;
         bool finalstats;
         bool quiet;
+        int sndbuf;
+        int rcvbuf;
     } cmd_args;
 
     massdns_module_t module;

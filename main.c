@@ -40,22 +40,24 @@ void print_help(char *file)
                     "Usage: %s [options] domainlist (- for stdin) \n"
                     "  -6                     Use IPv6.\n"
                     "  -a  --no-authority     Omit records from the authority section of the response packets.\n"
-                    "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)"
+                    "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "  -e  --additional       Include response records within the additional section.\n"
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same"
                     " domain. (Default: 200)\n"
-                    "  -l  --error-log        Error log file path. (Default: /dev/stderr)"
+                    "  -l  --error-log        Error log file path. (Default: /dev/stderr)\n"
                     "  -m  --module           Load a shared module in order to handle packets.\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --only-responses   Do not output DNS questions.\n"
                     "  -p  --progress         Show the progress and remaining time.\n"
                     "      --finalstats       Write final stats to STDERR when done.\n"
                     "  -q  --quiet            Quiet mode.\n"
+                    "      --rcvbuf           Size of the receive buffer in bytes.\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Allow running the program as root. Not recommended.\n"
                     "  -s  --hashmap-size     Set the size of the hashmap used for resolving. (Default: 100000)\n"
+                    "      --sndbuf           Size of the send buffer in bytes.\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "\n"
@@ -771,12 +773,11 @@ void massdns_scan(massdns_context_t *context)
     char *line = safe_malloc(line_buflen);
     size_t line_len = 0;
     int sock = socket(context->cmd_args.ip6 ? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
-    int socketbuf = 1024 * 1024 * 100;
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &socketbuf, sizeof(socketbuf)) != 0)
+    if (context->cmd_args.sndbuf && setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &context->cmd_args.sndbuf, sizeof(context->cmd_args.sndbuf)) != 0)
     {
         perror("Failed to adjust socket send buffer size.");
     }
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &socketbuf, sizeof(socketbuf)) != 0)
+    if (context->cmd_args.rcvbuf && setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &context->cmd_args.rcvbuf, sizeof(context->cmd_args.rcvbuf)) != 0)
     {
         perror("Failed to adjust socket receive buffer size.");
     }
@@ -986,6 +987,7 @@ int main(int argc, char **argv)
     context->cmd_args.resolve_count = 50;
     context->cmd_args.hashmap_size = 100000;
     context->cmd_args.interval_ms = 200;
+    context->cmd_args.sndbuf = context->cmd_args.rcvbuf = 8 * 1024 * 1024;
     context->cooldown = false;
     context->stdin = false;
     context->total_domains = 0;
@@ -1183,6 +1185,26 @@ int main(int argc, char **argv)
                 return 1;
             }
             context->cmd_args.interval_ms = (unsigned int) atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--sndbuf"))
+        {
+            if (i + 1 >= argc || atoi(argv[i + 1]) < 0)
+            {
+                fprintf(stderr, "The send buffer size has to be a valid number larger than or equal to 0.\n\n");
+                print_help(argv[0]);
+                return 1;
+            }
+            context->cmd_args.sndbuf = atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--rcvbuf"))
+        {
+            if (i + 1 >= argc || atoi(argv[i + 1]) < 0)
+            {
+                fprintf(stderr, "The receive buffer size has to be a valid number larger than or equal to 0.\n\n");
+                print_help(argv[0]);
+                return 1;
+            }
+            context->cmd_args.rcvbuf = atoi(argv[++i]);
         }
         else
         {
