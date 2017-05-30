@@ -1186,7 +1186,7 @@ int main(int argc, char **argv)
             }
             context->cmd_args.interval_ms = (unsigned int) atoi(argv[++i]);
         }
-        else if (strcmp(argv[i], "--sndbuf"))
+        else if (strcmp(argv[i], "--sndbuf") == 0)
         {
             if (i + 1 >= argc || atoi(argv[i + 1]) < 0)
             {
@@ -1196,7 +1196,7 @@ int main(int argc, char **argv)
             }
             context->cmd_args.sndbuf = atoi(argv[++i]);
         }
-        else if (strcmp(argv[i], "--rcvbuf"))
+        else if (strcmp(argv[i], "--rcvbuf") == 0)
         {
             if (i + 1 >= argc || atoi(argv[i + 1]) < 0)
             {
