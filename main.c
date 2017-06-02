@@ -38,6 +38,7 @@ void print_help(char *file)
 {
     fprintf(stderr, ""
                     "Usage: %s [options] domainlist (- for stdin) \n"
+                    "  -6                     Use IPv6.\n"
                     "  -a  --no-authority     Omit records from the authority section of the response packets.\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "  -e  --additional       Include response records within the additional section.\n"
@@ -585,7 +586,6 @@ struct sockaddr_storage *str_to_addr(char *str)
     }
     else if (inet_pton(AF_INET6, str, &ip6addr->sin6_addr) == 1)
     {
-        fprintf(stderr, "ip6\n");
         ip6addr->sin6_port = htons(53);
         ip6addr->sin6_family = AF_INET6;
         free(ip4addr);
@@ -677,9 +677,9 @@ buffer_t massdns_resolvers_from_file(char *filename)
     return resolvers;
 }
 
-sockaddr_in_t *massdns_get_resolver(size_t index, buffer_t *resolvers)
+struct sockaddr_storage *massdns_get_resolver(size_t index, buffer_t *resolvers)
 {
-    return ((sockaddr_in_t **) resolvers->data)[index % resolvers->len];
+    return ((struct sockaddr_storage **) resolvers->data)[index % resolvers->len];
 }
 
 bool handle_domain(void *k, void *l, void *c)
@@ -719,11 +719,14 @@ bool handle_domain(void *k, void *l, void *c)
         }
         ldns_pkt_free(packet);
         packet = NULL;
-        sockaddr_in_t *resolver = massdns_get_resolver((size_t) rand(), &context->resolvers);
+        struct sockaddr_storage *resolver = massdns_get_resolver((size_t) rand(), &context->resolvers);
         ssize_t n = -1;
         while (n < 0)
         {
+            errno = 0;
+            fwrite(resolver, sizeof(*resolver), 1, stdout);
             n = sendto(context->sock, buf, packet_size, 0, (sockaddr_t *) resolver, sizeof(*resolver));
+            //if(n<1) perror("err sending");
 #ifdef DEBUG
             if(n<1) fprintf(stdout,"DEBUG: Sending for domain %s failed with ret code %zu, retrying... \n",lookup->domain,n);
 #endif
@@ -771,7 +774,7 @@ void massdns_scan(massdns_context_t *context)
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = 0;
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int sock = socket(context->cmd_args.ip6 ? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
     int socketbuf = 1024 * 1024 * 100;
     if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &socketbuf, sizeof(socketbuf)) != 0)
     {
@@ -946,11 +949,26 @@ void massdns_scan(massdns_context_t *context)
     }
     hashmapFree(context->map);
     context->map = NULL;
-    fclose(f);
-    fclose(randomness);
-    fclose(context->outfile);
-    fclose(context->logfile);
+    if(f)
+    {
+        fclose(f);
+    }
+    if(randomness)
+    {
+        fclose(randomness);
+    }
+    if(context->outfile)
+    {
+        fclose(context->outfile);
+    }
+    if(context->logfile)
+    {
+        fclose(context->logfile);
+    }
 }
+
+
+massdns_context_t ctx;
 
 int main(int argc, char **argv)
 {
@@ -964,9 +982,7 @@ int main(int argc, char **argv)
         print_help(argc > 0 ? argv[0] : "massdns");
         return 1;
     }
-    massdns_context_t ctx;
     massdns_context_t *context = &ctx;
-    memset(&context->cmd_args, 0, sizeof(context->cmd_args));
     context->cmd_args.resolve_count = 50;
     context->cmd_args.hashmap_size = 100000;
     context->cmd_args.interval_ms = 200;
@@ -1114,6 +1130,10 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0)
         {
             context->cmd_args.quiet = true;
+        }
+        else if (strcmp(argv[i], "-6") == 0)
+        {
+            context->cmd_args.ip6 = true;
         }
         else if (strcmp(argv[i], "--resolve-count") == 0 || strcmp(argv[i], "-c") == 0)
         {

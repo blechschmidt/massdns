@@ -28,6 +28,7 @@ typedef struct massdns_context
     FILE *logfile;
     struct cmd_args
     {
+        bool ip6;
         bool root;
         char *resolvers;
         char *domains;

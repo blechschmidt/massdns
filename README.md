@@ -16,6 +16,7 @@ Clone the git repository and `cd` into the project root folder. Then run `make` 
 ## Usage
 ```
 Usage: ./bin/massdns [options] domainlist (- for stdin) 
+  -6                     Use IPv6.
   -a  --no-authority     Omit records from the authority section of the response packets.
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
   -e  --additional       Include response records within the additional section.
@@ -114,4 +115,4 @@ Please note that the module interfaces are not stable yet and are subject to cha
 - Implement bandwidth limits
 - Employ cross-resolver checks to detect DNS poisoning and DNS spam (e.g. [Level 3 DNS hijacking](https://web.archive.org/web/20140302064622/http://james.bertelson.me/blog/2014/01/level-3-are-now-hijacking-failed-dns-requests-for-ad-revenue-on-4-2-2-x/))
 - Implement IO-multiplexing to prevent 100% usage of a single CPU core
-- Support IPv6 resolvers
+- Support parallel usage of IPv6 and IPv4 resolvers
