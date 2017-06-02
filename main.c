@@ -570,6 +570,10 @@ int massdns_receive_packet(int socket, void (*handle_packet)(ldns_pkt *, struct 
 
 struct sockaddr_storage *str_to_addr(char *str)
 {
+    if(str == NULL || str[0] == 0)
+    {
+        return NULL;
+    }
     sockaddr_in_t *ip4addr = safe_calloc(sizeof(*ip4addr));
     sockaddr_in6_t *ip6addr = safe_calloc(sizeof(*ip6addr));
     if (inet_pton(AF_INET, str, &ip4addr->sin_addr) == 1)
@@ -579,23 +583,56 @@ struct sockaddr_storage *str_to_addr(char *str)
         free(ip6addr);
         return (struct sockaddr_storage *) ip4addr;
     }
+    else if (inet_pton(AF_INET6, str, &ip6addr->sin6_addr) == 1)
+    {
+        fprintf(stderr, "ip6\n");
+        ip6addr->sin6_port = htons(53);
+        ip6addr->sin6_family = AF_INET6;
+        free(ip4addr);
+        return (struct sockaddr_storage *) ip6addr;
+    }
     else
     {
-        char *colon = strstr(str, ":");
-        if (colon)
+        char *closing_square_bracket = strstr(str, "]");
+        if(closing_square_bracket && str[0] == '[')
         {
-            *colon = 0;
-            if (inet_pton(AF_INET, str, &ip4addr->sin_addr) == 1)
+            char *colon = strstr(closing_square_bracket, ":");
+            *closing_square_bracket = 0;
+            if(colon)
             {
-                int port = atoi(colon + 1);
-                if (port == 0 || port > 0xFFFF)
+                *colon = 0;
+                if (inet_pton(AF_INET6, str + 1, &ip6addr->sin6_addr) == 1)
                 {
-                    goto str_to_addr_error;
+                    int port = atoi(colon + 1);
+                    if (port == 0 || port > 0xFFFF)
+                    {
+                        goto str_to_addr_error;
+                    }
+                    ip6addr->sin6_port = htons((uint16_t) port);
+                    ip6addr->sin6_family = AF_INET6;
+                    free(ip4addr);
+                    return (struct sockaddr_storage *) ip6addr;
                 }
-                ip4addr->sin_port = htons((uint16_t) port);
-                ip4addr->sin_family = AF_INET;
-                free(ip6addr);
-                return (struct sockaddr_storage *) ip4addr;
+            }
+        }
+        else
+        {
+            char *colon = strstr(str, ":");
+            if (colon)
+            {
+                *colon = 0;
+                if (inet_pton(AF_INET, str, &ip4addr->sin_addr) == 1)
+                {
+                    int port = atoi(colon + 1);
+                    if (port == 0 || port > 0xFFFF)
+                    {
+                        goto str_to_addr_error;
+                    }
+                    ip4addr->sin_port = htons((uint16_t) port);
+                    ip4addr->sin_family = AF_INET;
+                    free(ip6addr);
+                    return (struct sockaddr_storage *) ip4addr;
+                }
             }
         }
         str_to_addr_error:
