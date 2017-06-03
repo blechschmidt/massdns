@@ -53,12 +53,12 @@ By default, MassDNS will print status information on standard error, results are
 ### Example
 Resolve all AAAA records from domains within domains.txt using the resolvers within resolvers.txt and store the results within results.txt:
 ```
-$ ./bin/massdns -r resolvers.txt -t AAAA example.txt > results.txt
+$ ./bin/massdns -r resolvers.txt -t AAAA domains.txt > results.txt
 ```
 
 This is equivalent to:
 ```
-$ ./bin/massdns -r resolvers.txt -t AAAA -w results.txt example.txt
+$ ./bin/massdns -r resolvers.txt -t AAAA -w results.txt domains.txt
 ```
 
 #### Example output
@@ -109,6 +109,13 @@ Also note that other branches than master should not be used in production at al
 MassDNS supports the development of minimalistic custom modules. An example module supporting binary output can be found within the folder `modules`.
 The example module has to be built separately by running `make`.
 Please note that the module interfaces are not stable yet and are subject to change during further development of MassDNS.
+
+## Practical considerations
+### Rate limiting evasion
+In case rate limiting by IPv6 resolvers is a problem, have a look at the [freebind](https://github.com/blechschmidt/freebind) project including `packetrand`, which will cause each packet to be sent from a different IPv6 address from a routed prefix.
+
+### Result authenticity
+If the authenticity of results is highly essential, you should not rely on the included resolver list. Instead, set up a local [unbound](https://www.unbound.net/) resolver and supply MassDNS with its IP address.
 
 ## Todo
 - Prevent flooding resolvers which are employing rate limits or refusing resolves after some time
