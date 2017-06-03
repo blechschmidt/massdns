@@ -724,7 +724,6 @@ bool handle_domain(void *k, void *l, void *c)
         while (n < 0)
         {
             errno = 0;
-            fwrite(resolver, sizeof(*resolver), 1, stdout);
             n = sendto(context->sock, buf, packet_size, 0, (sockaddr_t *) resolver, sizeof(*resolver));
             //if(n<1) perror("err sending");
 #ifdef DEBUG
