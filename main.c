@@ -40,6 +40,7 @@ void print_help(char *file)
                     "Usage: %s [options] domainlist (- for stdin) \n"
                     "  -6                     Use IPv6.\n"
                     "  -a  --no-authority     Omit records from the authority section of the response packets.\n"
+                    "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "  -e  --additional       Include response records within the additional section.\n"
                     "  -h  --help             Show this help.\n"
@@ -769,10 +770,6 @@ void massdns_scan(massdns_context_t *context)
     size_t line_buflen = 4096;
     char *line = safe_malloc(line_buflen);
     size_t line_len = 0;
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = 0;
     int sock = socket(context->cmd_args.ip6 ? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
     int socketbuf = 1024 * 1024 * 100;
     if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &socketbuf, sizeof(socketbuf)) != 0)
@@ -783,7 +780,7 @@ void massdns_scan(massdns_context_t *context)
     {
         perror("Failed to adjust socket receive buffer size.");
     }
-    bind(sock, (sockaddr_t *) &server_addr, sizeof(server_addr));
+    bind(sock, (sockaddr_t *) &context->server_addr, sizeof(context->server_addr));
 
     fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
 
@@ -982,6 +979,10 @@ int main(int argc, char **argv)
         return 1;
     }
     massdns_context_t *context = &ctx;
+    struct sockaddr_in *default_addr = (struct sockaddr_in*)&context->server_addr;
+    default_addr->sin_family = AF_INET;
+    default_addr->sin_addr.s_addr = INADDR_ANY;
+    default_addr->sin_port = 0;
     context->cmd_args.resolve_count = 50;
     context->cmd_args.hashmap_size = 100000;
     context->cmd_args.interval_ms = 200;
@@ -1015,6 +1016,25 @@ int main(int argc, char **argv)
                 print_help(argv[0]);
                 return 1;
             }
+        }
+        else if (strcmp(argv[i], "--bindto") == 0 || strcmp(argv[i], "-b") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "Missing address for socket binding.\n\n");
+                print_help(argv[0]);
+                return 1;
+            }
+            struct sockaddr_storage *server_addr = str_to_addr(argv[++i]);
+            if (server_addr == NULL)
+            {
+                fprintf(stderr, "Invalid address for socket binding.\n\n");
+                print_help(argv[0]);
+                return 1;
+
+            }
+            context->server_addr = *server_addr;
+            free(server_addr);
         }
         else if (strcmp(argv[i], "--module") == 0 || strcmp(argv[i], "-m") == 0)
         {

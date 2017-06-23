@@ -26,6 +26,7 @@ typedef struct massdns_context
     bool stdin;
     FILE *outfile;
     FILE *logfile;
+    struct sockaddr_storage server_addr;
     struct cmd_args
     {
         bool ip6;

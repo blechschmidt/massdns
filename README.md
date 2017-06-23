@@ -18,6 +18,7 @@ Clone the git repository and `cd` into the project root folder. Then run `make` 
 Usage: ./bin/massdns [options] domainlist (- for stdin) 
   -6                     Use IPv6.
   -a  --no-authority     Omit records from the authority section of the response packets.
+  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
   -e  --additional       Include response records within the additional section.
   -h  --help             Show this help.
