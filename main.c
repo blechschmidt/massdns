@@ -334,8 +334,7 @@ void print_stats(massdns_context_t *context)
         {
             fprintf(print, "\033[F\033[F");
         }
-        fprintf(print,
-                "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
+        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
     }
     else
     {
