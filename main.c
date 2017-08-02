@@ -328,18 +328,7 @@ void print_stats(massdns_context_t *context)
         }
     }
     FILE *print = stderr;
-    if (!context->initial)
-    {
-        if (context->cmd_args.show_progress)
-        {
-            fprintf(print, "\033[F\033[F");
-        }
-        fprintf(print, "\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[F\033[J");
-    }
-    else
-    {
-        context->initial = false;
-    }
+    fprintf(print, "\033[H\033[2J");
     fprintf(print, "Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers,
             total == 0 ? 0 : (float) stats.answers / total * 100);
     fprintf(print, "Succeeded queries (includes empty answer): %zu (%.2f%%)\n", stats.noerr,
