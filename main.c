@@ -328,6 +328,10 @@ void print_stats(massdns_context_t *context)
         }
     }
     FILE *print = stderr;
+    if(context->initial)
+    {
+        context->initial = false;
+    }
     fprintf(print, "\033[H\033[2J");
     fprintf(print, "Succeeded queries (only with RR answer): %zu (%.2f%%)\n", stats.answers,
             total == 0 ? 0 : (float) stats.answers / total * 100);
