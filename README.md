@@ -117,11 +117,14 @@ The example module has to be built separately by running `make`.
 Please note that the module interfaces are not stable yet and are subject to change during further development of MassDNS.
 
 ## Practical considerations
+### Performance tuning
+MassDNS is a simple single-threaded application designed for scenarios in which the network is the bottleneck. It is designed to be run on servers with high upload and download bandwidths. Internally, MassDNS makes use of a hash map which controls the concurrency of lookups. Setting the size parameter `-s` hence allows you to control the lookup rate. If you are experiencing performance issues, try adjusting the `-s` parameter in order to obtain a better success rate.
+
 ### Rate limiting evasion
 In case rate limiting by IPv6 resolvers is a problem, have a look at the [freebind](https://github.com/blechschmidt/freebind) project including `packetrand`, which will cause each packet to be sent from a different IPv6 address from a routed prefix.
 
 ### Result authenticity
-If the authenticity of results is highly essential, you should not rely on the included resolver list. Instead, set up a local [unbound](https://www.unbound.net/) resolver and supply MassDNS with its IP address.
+If the authenticity of results is highly essential, you should not rely on the included resolver list. Instead, set up a local [unbound](https://www.unbound.net/) resolver and supply MassDNS with its IP address. In case you are using MassDNS as a reconnaissance tool, you may wish to run it with the default resolver list first and re-run it on the found names with a list of trusted resolvers in order to eliminate false positives.
 
 ## Todo
 - Prevent flooding resolvers which are employing rate limits or refusing resolves after some time
@@ -129,3 +132,6 @@ If the authenticity of results is highly essential, you should not rely on the i
 - Employ cross-resolver checks to detect DNS poisoning and DNS spam (e.g. [Level 3 DNS hijacking](https://web.archive.org/web/20140302064622/http://james.bertelson.me/blog/2014/01/level-3-are-now-hijacking-failed-dns-requests-for-ad-revenue-on-4-2-2-x/))
 - Implement IO-multiplexing to prevent 100% usage of a single CPU core
 - Support parallel usage of IPv6 and IPv4 resolvers
+- Add wildcard detection for reconnaissance
+- Improve reconnaissance reliability by adding a mode which re-resolves found domains through a list of trusted (local) resolvers in order to eliminate false positives
+- Detect optimal concurrency automatically
