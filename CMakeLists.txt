@@ -1,32 +1,8 @@
-cmake_minimum_required(VERSION 3.2)
+cmake_minimum_required(VERSION 3.8)
 project(massdns)
 
-link_directories(/usr/lib)
+set(CMAKE_C_STANDARD 11)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ldl -std=c11")
-
-link_libraries(dl.so)
-
-link_libraries(libldns.so)
-
-set(LDNS_DIR /usr/include/ldns)
-
-set(LDNS_FILES
-        ${LDNS_DIR}/host2str.h
-        ${LDNS_DIR}/host2wire.h
-        ${LDNS_DIR}/wire2host.h
-        ${LDNS_DIR}/dnssec.h)
-
-set(SOURCE_FILES
-        main.c
-        buffers.h
-        hashmap.h
-        list.h
-        security.h
-        string.h
-        massdns.h
-        module.h)
-
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
-
-add_executable(massdns ${SOURCE_FILES} ${LDNS_FILES})
+set(SOURCE_FILES main.c module.h list.h hashmap.h massdns.h security.h mixed_list.h net.h string.h buffers.h dns.h
+        timed_ring.h random.h cmd.h)
+add_executable(massdns ${SOURCE_FILES})

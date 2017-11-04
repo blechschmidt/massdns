@@ -1,3 +1,5 @@
+#ifndef MASSDNS_HASHMAP_H
+#define MASSDNS_HASHMAP_H
 /*
  * Copyright (C) 2007 The Android Open Source Project
  *
@@ -19,6 +21,25 @@
 #include <string.h>
 #include <stdbool.h>
 #include <sys/types.h>
+
+// http://www.cse.yorku.ca/~oz/hash.html
+unsigned long hash_djb2(unsigned char *str)
+{
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *str++) != 0)
+    {
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    }
+    return hash;
+}
+
+int hash_string(void *str)
+{
+    return (int) hash_djb2((unsigned char *) str);
+}
+
+
 typedef struct Entry Entry;
 struct Entry {
     void* key;
@@ -202,6 +223,19 @@ void* hashmapGet(Hashmap* map, void* key) {
     }
     return NULL;
 }
+void* hashmapGetWithKey(Hashmap* map, void* key, void **originalKey) {
+    int hash = hashKey(map, key);
+    size_t index = calculateIndex(map->bucketCount, hash);
+    Entry* entry = map->buckets[index];
+    while (entry != NULL) {
+        if (equalKeys(entry->key, entry->hash, key, hash, map->equals)) {
+            *originalKey = entry->key;
+            return entry->value;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
 bool hashmapContainsKey(Hashmap* map, void* key) {
     int hash = hashKey(map, key);
     size_t index = calculateIndex(map->bucketCount, hash);
@@ -302,3 +336,4 @@ bool hashmapIntEquals(void* keyA, void* keyB) {
     int b = *((int*) keyB);
     return a == b;
 }
+#endif

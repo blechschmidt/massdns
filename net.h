@@ -1,0 +1,133 @@
+#ifndef MASSRESOLVER_NET_H
+#define MASSRESOLVER_NET_H
+
+#include <stdbool.h>
+#include <fcntl.h>
+
+#define loop_sockets(sockets) \
+        for (socket_info_t *socket = (sockets)->data; socket < ((socket_info_t*)(sockets)->data) + (sockets)->len; socket++)
+
+typedef enum
+{
+    PROTO_IPV4 = 1 << 0,
+    PROTO_IPV6 = 1 << 1
+} ip_support_t;
+
+typedef enum
+{
+    SOCKET_TYPE_INTERFACE,
+    SOCKET_TYPE_QUERY,
+    SOCKET_TYPE_CONTROL
+} socket_type_t;
+
+typedef enum
+{
+    NETMODE_EPOLL,
+    NETMODE_BUSYPOLL
+} netmode_t;
+
+typedef struct
+{
+    ip_support_t protocol;
+    int descriptor;
+    socket_type_t type;
+} socket_info_t;
+
+void socket_noblock(socket_info_t* socket)
+{
+    int sd = socket->descriptor;
+    int flags = fcntl(sd, F_GETFL, 0);
+    fcntl(sd, F_SETFL, flags | O_NONBLOCK);
+}
+
+void add_sockets(int epollfd, uint32_t events, int op, buffer_t *sockets)
+{
+    socket_info_t *interface_sockets = sockets->data;
+    for (size_t i = 0; i < sockets->len; i++)
+    {
+        struct epoll_event ev;
+        bzero(&ev, sizeof(ev));
+        ev.data.ptr = &interface_sockets[i];
+        ev.events = events;
+        if (epoll_ctl(epollfd, op, interface_sockets[i].descriptor, &ev) != 0)
+        {
+            perror("Failed to add epoll event");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+bool str_to_addr(char *str, uint16_t default_port, struct sockaddr_storage *addr)
+{
+    if(str == NULL || str[0] == 0)
+    {
+        return false;
+    }
+    while(*str == ' ' || *str == '\t') // Skip whitespaces ("trim left")
+    {
+        str++;
+    }
+    unsigned long int port = default_port;
+
+    if(str[0] == '[')
+    {
+        str++;
+        char *closing_bracket = strstr(str, "]");
+        if(!closing_bracket)
+        {
+            return false;
+        }
+        if(closing_bracket[1] == ':') // Is there a port separator?
+        {
+            *closing_bracket = 0;
+            char *invalid_char;
+            port = strtoul(closing_bracket + 2, &invalid_char, 10);
+            if (*invalid_char != 0 || port >= UINT16_MAX)
+            {
+                return false;
+            }
+        }
+    }
+    else // We either have an IPv6 address without square brackets or an IPv4 address
+    {
+        bool v4 = false;
+        char *colon = NULL;
+        for(char *c = str; *c != 0; c++)
+        {
+            if(*c == '.' && colon == NULL) // dot before colon
+            {
+                v4 = true;
+            }
+            if(*c == ':')
+            {
+                colon = c;
+            }
+        }
+        if(v4 && colon) // We found the port separator
+        {
+            *colon = 0;
+            char *invalid_char;
+            port = strtoul(colon + 1, &invalid_char, 10);
+            if (*invalid_char != 0 || port >= UINT16_MAX)
+            {
+                return false;
+            }
+        }
+
+    }
+    if (inet_pton(AF_INET, str, &((struct sockaddr_in*)addr)->sin_addr) == 1)
+    {
+        ((struct sockaddr_in*)addr)->sin_port = htons((uint16_t )port);
+        ((struct sockaddr_in*)addr)->sin_family = AF_INET;
+        return true;
+    }
+    else if (inet_pton(AF_INET6, str, &((struct sockaddr_in6*)addr)->sin6_addr) == 1)
+    {
+        ((struct sockaddr_in6*)addr)->sin6_port = htons((uint16_t )port);
+        ((struct sockaddr_in6*)addr)->sin6_family = AF_INET6;
+        return true;
+    }
+    return false;
+}
+
+#endif //MASSRESOLVER_NET_H

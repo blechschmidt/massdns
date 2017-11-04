@@ -59,9 +59,11 @@ void *safe_calloc(size_t n)
  *
  * @param ptr A pointer to a pointer that has been obtained using (safe_)malloc.
  */
-void safe_free(void *ptr)
+void safe_free(void **ptr)
 {
-    free(*((void**)ptr));
-    *((void**)ptr) = NULL;
+    free(*ptr);
+    *ptr = NULL;
 }
+
+
 #endif
