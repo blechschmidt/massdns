@@ -196,8 +196,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
     single_list_init(bind_addrs);
 
     *buffer = single_list_to_array(&sockets);
-
-    single_list_free(&sockets);
+    single_list_clear(&sockets);
 }
 
 void query_sockets_setup()
@@ -985,7 +984,7 @@ int parse_cmd(int argc, char **argv)
         {
             context.cmd_args.norecurse = true;
         }
-        else if (strcmp(argv[i], "--binary") == 0)
+        else if (strcmp(argv[i], "--output") == 0)
         {
             expect_arg(i++);
             if(strchr(argv[i], 'B'))
