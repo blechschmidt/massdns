@@ -430,11 +430,11 @@ void check_progress()
                 "Finished total: %zu, success: %zu (%.2f%%)\n"
                 "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
                 "Failures: %s\n"
-                "Response: | Success:              | Total:\n"
-                "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
-                "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
-                "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
-                "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
+                "Response: | Success:               | Total:\n"
+                "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+                "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+                "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+                "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
                 "FORMERR:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n",
             context.stats.numdomains,
             context.stats.numreplies,
