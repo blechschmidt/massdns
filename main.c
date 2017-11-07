@@ -357,12 +357,9 @@ void send_query(lookup_t *lookup)
 
 void check_progress()
 {
-    static char * clear = "";
     static struct timespec last_time;
     static char timeouts[4096];
     static char timeouts_clear[4096 * 7 + 1]; // 7: length of the ANSI code for moving cursor up and clearing a line
-    static struct winsize w;
-    static bool first  = true;
     static struct timespec now;
 
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -388,8 +385,6 @@ void check_progress()
     long long min = (elapsed / 60) % 60;
     long long h = elapsed / 3600;
     size_t average_pps = elapsed == 0 ? rate_pps : context.stats.numreplies * TIMED_RING_S / total_elapsed_ns;
-
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
 
     float progress = context.state == STATE_DONE ? 100 : 0;
     if(context.domainfile_size > 0) // If the domain file is not a real file, the progress cannot be estimated.
@@ -427,38 +422,41 @@ void check_progress()
         offset += result;
     }
 
-    // Clear the appropriate amount of lines
-    if(!first && w.ws_col > 0)
-    {
-        // Offset holds the length of the character in the timeouts buffer.
-        // Thus, we add strlen("Failures: ") and divide it by the number of terminal columns
-        // in order to obtain the number of lines occupied by the timeout stats.
-        int lines = (offset + sizeof("Failures: ") - 1) / w.ws_col;
-        for (size_t i = 0; i < lines; i++)
-        {
-            // Write code for moving cursor up and clearing line to buffer.
-            sprintf(timeouts_clear + i * 7, "\033[1A\033[K");
-        }
-        timeouts_clear[lines * 7] = 0;
-    }
-
     fprintf(stderr,
-            "%s%sProcessed queries: %zu\n"
-            "Received packets: %zu\n"
-            "Progress: %6.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
-            "Current incoming rate: %zu pps\n"
-            "Average incoming rate: %zu pps\n"
-            "Finished queries: %zu\n"
-            "Failures: %s\n",
-            timeouts_clear, clear, context.stats.numdomains, context.stats.numreplies, progress * 100, h, min, sec,
-            prog_h, prog_min, prog_sec, rate_pps, average_pps, context.stats.finished, timeouts);
-
-    // Clear the other lines we printed
-    clear = "\033[1A\033[K" "\033[1A\033[K" "\033[1A\033[K" "\033[1A\033[K" "\033[1A\033[K" "\033[1A\033[K" "\033[1A\033[K";
+            "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
+                "Processed queries: %zu\n"
+                "Received packets: %zu\n"
+                "Progress: %6.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
+                "Current rate: %zu pps, average: %zu pps\n"
+                "Finished total: %zu, success: %zu (%6.2f%%)\n"
+                "OK: %zu (%6.2f%%), "
+                "NXDOMAIN: %zu (%6.2f%%), "
+                "SERVFAIL: %zu (%6.2f%%), "
+                "REFUSED: %zu (%6.2f%%), "
+                "FORMERR: %zu (%6.2f%%)\n"
+                "Mismatched domains: %zu (%6.2f%%), IDs: %zu (%6.2f%%)\n"
+                "Failures: %s\n",
+            context.stats.numdomains,
+            context.stats.numreplies,
+            progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
+            context.stats.finished, context.stats.finished_success,
+            context.stats.finished_success / (float)context.stats.finished * 100,
+            context.stats.final_rcodes[DNS_RCODE_OK],
+            context.stats.final_rcodes[DNS_RCODE_OK] / (float)context.stats.finished_success * 100,
+            context.stats.final_rcodes[DNS_RCODE_NXDOMAIN],
+            context.stats.final_rcodes[DNS_RCODE_NXDOMAIN] / (float)context.stats.finished_success * 100,
+            context.stats.final_rcodes[DNS_RCODE_SERVFAIL],
+            context.stats.final_rcodes[DNS_RCODE_SERVFAIL] / (float)context.stats.finished_success * 100,
+            context.stats.final_rcodes[DNS_RCODE_REFUSED],
+            context.stats.final_rcodes[DNS_RCODE_REFUSED] / (float)context.stats.finished_success * 100,
+            context.stats.final_rcodes[DNS_RCODE_FORMERR],
+            context.stats.final_rcodes[DNS_RCODE_FORMERR] / (float)context.stats.finished_success * 100,
+            context.stats.mismatch_domain, context.stats.mismatch_domain / (float)context.stats.numreplies * 100,
+            context.stats.mismatch_id, context.stats.mismatch_id / (float)context.stats.numreplies * 100,
+            timeouts);
 
     // Call this function in about one second again
     timed_ring_add(&context.ring, TIMED_RING_S, check_progress);
-    first = false;
 }
 
 void done()
@@ -584,7 +582,6 @@ void can_read(socket_info_t *info)
     static uint8_t *parse_offset;
     static lookup_key_t search_key;
     static lookup_t *lookup;
-    static char question_str[2048];
 
 
     fromlen = sizeof(recvaddr);
@@ -607,11 +604,13 @@ void can_read(socket_info_t *info)
     lookup = hashmapGet(context.map, &search_key);
     if(!lookup) // Most likely reason: delayed response after duplicate query
     {
+        context.stats.mismatch_domain++;
         return;
     }
 
     if(lookup->transaction != packet.head.header.id)
     {
+        context.stats.mismatch_id++;
         return;
     }
 
@@ -629,6 +628,11 @@ void can_read(socket_info_t *info)
     }
     else
     {
+        // We are done with the lookup because we received an acceptable reply.
+        lookup_done(lookup);
+        context.stats.finished_success++;
+        context.stats.final_rcodes[packet.head.header.rcode]++;
+
         // Print packet
         time_t now = time(NULL);
         uint16_t short_len = (uint16_t) num_received;
@@ -636,7 +640,6 @@ void can_read(socket_info_t *info)
         dns_record_t rec;
         size_t rec_index = 0;
 
-        // TODO: Finish implementing text output
         switch(context.cmd_args.output)
         {
             case OUTPUT_BINARY:
@@ -670,8 +673,6 @@ void can_read(socket_info_t *info)
                 }
                 break;
         }
-
-        lookup_done(lookup);
     }
 }
 

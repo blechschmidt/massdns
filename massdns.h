@@ -139,19 +139,6 @@ typedef struct
     struct
     {
         struct timespec start_time;
-        size_t answers;
-        size_t noerr;
-        size_t formerr;
-        size_t servfail;
-        size_t nxdomain;
-        size_t notimp;
-        size_t refused;
-        size_t yxdomain;
-        size_t yxrrset;
-        size_t nxrrset;
-        size_t notauth;
-        size_t notzone;
-        size_t timeout;
         size_t mismatch;
         size_t other;
         size_t qsent;
@@ -160,7 +147,11 @@ typedef struct
         struct timespec last_print;
         size_t current_rate;
         size_t timeouts[0x100];
+        size_t final_rcodes[0x10000];
         size_t finished;
+        size_t finished_success;
+        size_t mismatch_id;
+        size_t mismatch_domain;
     } stats;
 
 } massdns_context_t;
