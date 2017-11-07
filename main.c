@@ -40,6 +40,7 @@ void print_help()
                     "      --root             Do not drop privileges when running as root. Not recommended.\n"
                     "  -s  --hashmap-size     Number of concurrent lookups. (Default: 100000)\n"
                     "      --sndbuf           Size of the send buffer in bytes.\n"
+                    "      --sticky-resolver  Do not switch the resolver when retrying.\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "  -x  --extreme          Value between 0 and 2 specifying transmission aggression. (Default: 0)\n"
@@ -314,11 +315,14 @@ void send_query(lookup_t *lookup)
 
     // Choose random resolver
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
-    resolver_t *resolver = ((resolver_t**)context.resolvers.data)[urandom_size_t() % context.resolvers.len];
+    if(!context.cmd_args.sticky || lookup->resolver == NULL)
+    {
+        lookup->resolver = ((resolver_t **) context.resolvers.data)[urandom_size_t() % context.resolvers.len];
+    }
 
     // We need to select the correct socket pool: IPv4 socket pool for IPv4 resolver/IPv6 socket pool for IPv6 resolver
     buffer_t *interfaces;
-    if(resolver->address.ss_family == AF_INET)
+    if(lookup->resolver->address.ss_family == AF_INET)
     {
         interfaces = &context.sockets.interfaces4;
     }
@@ -342,8 +346,9 @@ void send_query(lookup_t *lookup)
     // Set or unset the QD bit based on user preference
     dns_buf_set_rd(query_buffer, !context.cmd_args.norecurse);
 
-    ssize_t sent = sendto(socket_descriptor, query_buffer, (size_t) result, 0, (struct sockaddr *) &resolver->address,
-           resolver->address.ss_family == PF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
+    ssize_t sent = sendto(socket_descriptor, query_buffer, (size_t) result, 0,
+                          (struct sockaddr *) &lookup->resolver->address,
+                          sizeof(lookup->resolver->address));
     if(sent != result)
     {
         fprintf(stderr, "Error sending: %s\n", strerror(errno));
@@ -999,6 +1004,10 @@ int parse_cmd(int argc, char **argv)
             {
                 context.cmd_args.output = OUTPUT_TEXT_FULL;
             }
+        }
+        else if (strcmp(argv[i], "--sticky-resolver") == 0)
+        {
+            context.cmd_args.sticky = true;
         }
         else if (strcmp(argv[i], "--finalstats") == 0)
         {

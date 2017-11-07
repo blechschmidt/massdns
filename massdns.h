@@ -44,6 +44,12 @@ typedef struct
 
 typedef struct
 {
+    struct sockaddr_storage address;
+    resolver_stats_t stats; // To be used to track resolver bans or non-replying resolvers
+} resolver_t;
+
+typedef struct
+{
     char *domain;
     dns_record_type type;
 } lookup_key_t;
@@ -53,14 +59,9 @@ typedef struct
     unsigned char tries;
     uint16_t transaction;
     void **ring_entry; // pointer to the entry within the timed ring for entry invalidation
+    resolver_t *resolver;
     lookup_key_t *key;
 } lookup_t;
-
-typedef struct
-{
-    struct sockaddr_storage address;
-    resolver_stats_t stats; // To be used to track resolver bans or non-replying resolvers
-} resolver_t;
 
 typedef enum
 {
@@ -111,6 +112,7 @@ typedef struct
         bool retry_codes_set;
         single_list_t bind_addrs4;
         single_list_t bind_addrs6;
+        bool sticky;
         int argc;
         char **argv;
         void (*help_function)();
