@@ -143,11 +143,13 @@ typedef struct
         size_t other;
         size_t qsent;
         size_t numreplies;
+        size_t numparsed;
         size_t numdomains;
         struct timespec last_print;
         size_t current_rate;
         size_t timeouts[0x100];
         size_t final_rcodes[0x10000];
+        size_t all_rcodes[0x10000];
         size_t finished;
         size_t finished_success;
         size_t mismatch_id;

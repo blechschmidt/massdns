@@ -359,7 +359,6 @@ void check_progress()
 {
     static struct timespec last_time;
     static char timeouts[4096];
-    static char timeouts_clear[4096 * 7 + 1]; // 7: length of the ANSI code for moving cursor up and clearing a line
     static struct timespec now;
 
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -426,34 +425,64 @@ void check_progress()
             "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
                 "Processed queries: %zu\n"
                 "Received packets: %zu\n"
-                "Progress: %6.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
+                "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
                 "Current rate: %zu pps, average: %zu pps\n"
-                "Finished total: %zu, success: %zu (%6.2f%%)\n"
-                "OK: %zu (%6.2f%%), "
-                "NXDOMAIN: %zu (%6.2f%%), "
-                "SERVFAIL: %zu (%6.2f%%), "
-                "REFUSED: %zu (%6.2f%%), "
-                "FORMERR: %zu (%6.2f%%)\n"
-                "Mismatched domains: %zu (%6.2f%%), IDs: %zu (%6.2f%%)\n"
-                "Failures: %s\n",
+                "Finished total: %zu, success: %zu (%.2f%%)\n"
+                "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
+                "Failures: %s\n"
+                "Response: | Success:              | Total:\n"
+                "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
+                "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
+                "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
+                "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)"
+                "FORMERR:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n",
             context.stats.numdomains,
             context.stats.numreplies,
             progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
             context.stats.finished, context.stats.finished_success,
-            context.stats.finished_success / (float)context.stats.finished * 100,
+            context.stats.finished == 0 ? 0 : context.stats.finished_success / (float)context.stats.finished * 100,
+            context.stats.mismatch_domain,
+            context.stats.numreplies == 0 ? 0 : context.stats.mismatch_domain / (float)context.stats.numreplies * 100,
+            context.stats.mismatch_id,
+            context.stats.numreplies == 0 ? 0 : context.stats.mismatch_id / (float)context.stats.numreplies * 100,
+            timeouts,
+
             context.stats.final_rcodes[DNS_RCODE_OK],
+            context.stats.finished_success == 0 ? 0 :
             context.stats.final_rcodes[DNS_RCODE_OK] / (float)context.stats.finished_success * 100,
+            context.stats.all_rcodes[DNS_RCODE_OK],
+            context.stats.numparsed == 0 ? 0 :
+            context.stats.all_rcodes[DNS_RCODE_OK] / (float)context.stats.numparsed * 100,
+
             context.stats.final_rcodes[DNS_RCODE_NXDOMAIN],
+            context.stats.finished_success == 0 ? 0 :
             context.stats.final_rcodes[DNS_RCODE_NXDOMAIN] / (float)context.stats.finished_success * 100,
+            context.stats.all_rcodes[DNS_RCODE_NXDOMAIN],
+            context.stats.numparsed == 0 ? 0 :
+            context.stats.all_rcodes[DNS_RCODE_NXDOMAIN] / (float)context.stats.numparsed * 100,
+
             context.stats.final_rcodes[DNS_RCODE_SERVFAIL],
+            context.stats.finished_success == 0 ? 0 :
             context.stats.final_rcodes[DNS_RCODE_SERVFAIL] / (float)context.stats.finished_success * 100,
+            context.stats.all_rcodes[DNS_RCODE_SERVFAIL],
+            context.stats.numparsed == 0 ? 0 :
+            context.stats.all_rcodes[DNS_RCODE_SERVFAIL] / (float)context.stats.numparsed * 100,
+
             context.stats.final_rcodes[DNS_RCODE_REFUSED],
+            context.stats.finished_success == 0 ? 0 :
             context.stats.final_rcodes[DNS_RCODE_REFUSED] / (float)context.stats.finished_success * 100,
+            context.stats.all_rcodes[DNS_RCODE_REFUSED],
+            context.stats.numparsed == 0 ? 0 :
+            context.stats.all_rcodes[DNS_RCODE_REFUSED] / (float)context.stats.numparsed * 100,
+
             context.stats.final_rcodes[DNS_RCODE_FORMERR],
+            context.stats.finished_success == 0 ? 0 :
             context.stats.final_rcodes[DNS_RCODE_FORMERR] / (float)context.stats.finished_success * 100,
-            context.stats.mismatch_domain, context.stats.mismatch_domain / (float)context.stats.numreplies * 100,
-            context.stats.mismatch_id, context.stats.mismatch_id / (float)context.stats.numreplies * 100,
-            timeouts);
+            context.stats.all_rcodes[DNS_RCODE_FORMERR],
+            context.stats.numparsed == 0 ? 0 :
+            context.stats.all_rcodes[DNS_RCODE_FORMERR] / (float)context.stats.numparsed * 100
+            
+    );
 
     // Call this function in about one second again
     timed_ring_add(&context.ring, TIMED_RING_S, check_progress);
@@ -598,6 +627,9 @@ void can_read(socket_info_t *info)
     {
         return;
     }
+
+    context.stats.numparsed++;
+    context.stats.all_rcodes[packet.head.header.rcode]++;
 
     search_key.type = packet.head.question.type;
     search_key.domain = (char*)packet.head.question.name.name;
