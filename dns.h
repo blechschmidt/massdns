@@ -205,9 +205,14 @@ bool dns_str2rcode(char *str, dns_rcode *code)
         *code = DNS_RCODE_OK;
         return true;
     }
-    else if(strcasecmp(str, "servfail") == 0)
+    else if(strcasecmp(str, "formerr") == 0)
     {
         *code = DNS_RCODE_FORMERR;
+        return true;
+    }
+    else if(strcasecmp(str, "servfail") == 0)
+    {
+        *code = DNS_RCODE_SERVFAIL;
         return true;
     }
     else if(strcasecmp(str, "nxdomain") == 0)

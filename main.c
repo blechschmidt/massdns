@@ -411,8 +411,8 @@ void check_progress()
     int offset = 0;
     for(size_t i = 0; i <= context.cmd_args.resolve_count; i++)
     {
-        float share = context.stats.numdomains == 0 ?
-                      0 : context.stats.timeouts[i] * 100 / (float)context.stats.numdomains;
+        float share = context.stats.finished == 0 ?
+                      0 : context.stats.timeouts[i] * 100 / (float)context.stats.finished;
         int result = snprintf(timeouts + offset, sizeof(timeouts) - offset, "%zu: %.2f%%, ", i, share);
         if(result <= 0 || result >= sizeof(timeouts) - offset)
         {
