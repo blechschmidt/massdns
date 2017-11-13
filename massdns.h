@@ -116,6 +116,7 @@ typedef struct
         int argc;
         char **argv;
         void (*help_function)();
+        bool flush;
     } cmd_args;
 
     struct

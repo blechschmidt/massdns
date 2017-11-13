@@ -705,6 +705,12 @@ void can_read(socket_info_t *info)
                 }
                 break;
         }
+
+        // Sometimes, users may want to obtain results immediately.
+        if(context.cmd_args.flush)
+        {
+            fflush(context.outfile);
+        }
     }
 }
 
@@ -1074,6 +1080,10 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--rcvbuf") == 0)
         {
             context.cmd_args.rcvbuf = (int)expect_arg_nonneg(i++, 0, INT_MAX);
+        }
+        else if (strcmp(argv[i], "--flush") == 0)
+        {
+            context.cmd_args.flush = true;
         }
         else
         {
