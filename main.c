@@ -26,6 +26,7 @@ void print_help()
                     "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
+                    "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same\n"
                     "                         domain. (Default: 200)\n"
@@ -820,6 +821,11 @@ void run()
         exit(1);
     }
 
+    if(context.cmd_args.output == OUTPUT_BINARY)
+    {
+        binfile_write_head();
+    }
+
     // It is important to call default interface sockets setup before reading the resolver list
     // because that way we can warn if the socket creation for a certain IP protocol failed although a resolver
     // requires the protocol.
@@ -831,11 +837,6 @@ void run()
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
     context.epollfd = epoll_create(1);
     timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
-
-    if(context.cmd_args.output == OUTPUT_BINARY)
-    {
-        binfile_write_head();
-    }
 
     add_sockets(context.epollfd, EPOLLIN | EPOLLOUT, EPOLL_CTL_ADD, &context.sockets.interfaces4);
     add_sockets(context.epollfd, EPOLLIN | EPOLLOUT, EPOLL_CTL_ADD, &context.sockets.interfaces6);
@@ -1101,7 +1102,7 @@ int parse_cmd(int argc, char **argv)
                     context.domainfile = fopen(argv[i], "r");
                     if (context.domainfile == NULL)
                     {
-                        fprintf(stderr, "Failed to open domain file.\n");
+                        fprintf(stderr, "Failed to open domain file \"%s\".\n", argv[i]);
                         exit(1);
                     }
                     if(fseek(context.domainfile, 0, SEEK_END) != 0)

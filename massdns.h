@@ -137,6 +137,7 @@ typedef struct
     state_t state;
     timed_ring_t ring; // handles timeouts
     size_t lookup_index;
+    size_t fork_index;
     struct
     {
         struct timespec start_time;
