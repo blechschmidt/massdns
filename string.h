@@ -36,11 +36,24 @@ void strtolower(char *str)
     }
 }
 
+char *trim_start(char *str)
+{
+    while (0 != *str)
+    {
+        if(!isspace(*str))
+        {
+            return str;
+        }
+        str++;
+    }
+    return str;
+}
+
 void trim_end(char* str)
 {
     while (0 != *str)
     {
-        if(*str == ' ' || *str == '\n' || *str == '\t' || *str == '\r')
+        if(isspace(*str))
         {
             *str = 0;
             return;
