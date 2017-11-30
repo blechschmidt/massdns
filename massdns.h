@@ -117,6 +117,7 @@ typedef struct
         char **argv;
         void (*help_function)();
         bool flush;
+        bool predictable_resolver;
     } cmd_args;
 
     struct

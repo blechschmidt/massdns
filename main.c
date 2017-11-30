@@ -318,7 +318,14 @@ void send_query(lookup_t *lookup)
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
     if(!context.cmd_args.sticky || lookup->resolver == NULL)
     {
-        lookup->resolver = ((resolver_t **) context.resolvers.data)[urandom_size_t() % context.resolvers.len];
+        if(context.cmd_args.predictable_resolver)
+        {
+            lookup->resolver = ((resolver_t **) context.resolvers.data)[context.lookup_index % context.resolvers.len];
+        }
+        else
+        {
+            lookup->resolver = ((resolver_t **) context.resolvers.data)[urandom_size_t() % context.resolvers.len];
+        }
     }
 
     // We need to select the correct socket pool: IPv4 socket pool for IPv4 resolver/IPv6 socket pool for IPv6 resolver
@@ -1045,6 +1052,10 @@ int parse_cmd(int argc, char **argv)
             {
                 context.cmd_args.output = OUTPUT_TEXT_FULL;
             }
+        }
+        else if (strcmp(argv[i], "--predictable-resolver") == 0)
+        {
+            context.cmd_args.predictable_resolver = true;
         }
         else if (strcmp(argv[i], "--sticky-resolver") == 0)
         {
