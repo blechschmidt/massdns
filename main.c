@@ -82,8 +82,8 @@ buffer_t massdns_resolvers_from_file(char *filename)
             struct sockaddr_storage *addr = safe_malloc(sizeof(addr));
             if (str_to_addr(line, 53, addr))
             {
-                if(addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0
-                    || addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0)
+                if((addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0)
+                    || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
                 {
                     single_list_push_back(list, addr);
                 }

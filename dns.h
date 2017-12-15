@@ -726,10 +726,6 @@ static bool parse_name(uint8_t *begin, uint8_t *buf, const uint8_t *end, uint8_t
     }
 }
 
-static uint8_t dns_packet_buffer[272] = {0};
-
-static size_t dns_packet_buffer_len;
-
 static inline void dns_buffer_set_id(uint8_t *buf, uint16_t id)
 {
     *((uint16_t *) buf) = htons(id);
@@ -1398,6 +1394,7 @@ char *dns_section2str(dns_section_t section)
         case DNS_SECTION_QUESTION:
             return "QUESTION";
     }
+    return "UNKNOWN";
 }
 
 void dns_print_packet(FILE *f, dns_pkt_t *packet, uint8_t *begin, size_t len, uint8_t *next)
