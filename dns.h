@@ -121,7 +121,7 @@ dns_record_type dns_str_to_record_type(const char *str)
                         case 's':
                             if(str[3] == 0)
                             {
-                                DNS_REC_CDS;
+                                return DNS_REC_CDS;
                             }
                             return DNS_REC_INVALID;
                         case 'n':
