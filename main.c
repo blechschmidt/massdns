@@ -1,5 +1,10 @@
 #define _GNU_SOURCE
 
+#define DEBUG
+
+#ifdef DEBUG
+#include <sys/resource.h>
+#endif
 
 #include "massdns.h"
 #include "string.h"
@@ -7,16 +12,21 @@
 #include "net.h"
 #include "cmd.h"
 #include "dns.h"
+#include "list.h"
+#include "flow.h"
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <stddef.h>
+#include <sys/sysinfo.h>
 #include <limits.h>
 
-#define DEBUG
-
-#ifdef DEBUG
-#include <sys/resource.h>
+#ifdef PCAP_SUPPORT
+#include <net/ethernet.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <netinet/udp.h>
+#include <net/if.h>
 #endif
 
 void print_help()
@@ -103,6 +113,12 @@ buffer_t massdns_resolvers_from_file(char *filename)
 
 void cleanup()
 {
+#ifdef PCAP_SUPPORT
+    if(context.pcap != NULL)
+    {
+        pcap_close(context.pcap);
+    }
+#endif
     hashmapFree(context.map);
     timed_ring_destroy(&context.ring);
 
@@ -124,6 +140,18 @@ void cleanup()
     if(context.outfile)
     {
         fclose(context.outfile);
+    }
+
+    free(context.sockets.pipes);
+
+    free(context.sockets.master_pipes_read);
+
+    for (size_t i = 0; i < context.cmd_args.num_processes * 2; i++)
+    {
+        if(context.sockets.pipes[i] >= 0)
+        {
+            close(context.sockets.pipes[i]);
+        }
     }
 }
 
@@ -169,6 +197,7 @@ void set_default_socket(int version)
 void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
 {
     single_list_t sockets;
+    single_list_init(&sockets);
     single_list_ref_foreach_free(bind_addrs, element)
     {
         struct sockaddr_storage* addr = element->data;
@@ -180,7 +209,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         {
             if(bind(info.descriptor, (struct sockaddr*)addr, sizeof(*addr)) != 0)
             {
-                fprintf(stderr, "Not adding socket due to bind failure: %s", strerror(errno));
+                fprintf(stderr, "Not adding socket due to bind failure: %s\n", strerror(errno));
             }
             else
             {
@@ -196,8 +225,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         free(element->data);
     }
     single_list_init(bind_addrs);
-
-    *buffer = single_list_to_array(&sockets);
+    *buffer = single_list_to_array_copy(&sockets, sizeof(socket_info_t));
     single_list_clear(&sockets);
 }
 
@@ -275,12 +303,17 @@ void end_warmup()
     if(context.cmd_args.extreme <= 1)
     {
         // Reduce our CPU load from epoll interrupts by removing the EPOLLOUT event
-        add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces4);
-        add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces6);
+#ifdef PCAP_SUPPORT
+        if(!context.pcap)
+#endif
+        {
+            add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces4);
+            add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces6);
+        }
     }
 }
 
-lookup_t *new_lookup(const char *qname, dns_record_type type)
+lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
 {
     lookup_key_t *key = safe_malloc(sizeof(*key));
 
@@ -293,7 +326,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     value->key = key;
 
     errno = 0;
-    hashmapPut(context.map, key, value);
+    *new = (hashmapPut(context.map, key, value) == NULL);
     if(errno != 0)
     {
         perror("Error");
@@ -383,6 +416,12 @@ void check_progress()
         return;
     }
 
+    // Send the stats of the child to the parent process
+    if(context.cmd_args.num_processes > 1 && context.fork_index != 0)
+    {
+        write(context.sockets.write_pipe.descriptor, &context.fork_index, sizeof(context.fork_index));
+    }
+
     // Go on with printing stats.
 
     time_t total_elapsed_ns = (now.tv_sec - context.stats.start_time.tv_sec) * 1000000000
@@ -430,7 +469,7 @@ void check_progress()
     }
 
     fprintf(stderr,
-            "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
+            //"\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
                 "Processed queries: %zu\n"
                 "Received packets: %zu\n"
                 "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
@@ -505,6 +544,7 @@ void done()
 void can_send()
 {
     char *qname;
+    bool new;
 
     while (hashmapSize(context.map) < context.cmd_args.hashmap_size && context.state <= STATE_QUERYING)
     {
@@ -518,7 +558,11 @@ void can_send()
             break;
         }
         context.stats.numdomains++;
-        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type);
+        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
+        if(!new)
+        {
+            break;
+        }
         send_query(lookup);
     }
 }
@@ -609,29 +653,17 @@ char *sockaddr2str(struct sockaddr_storage *addr)
     return str;
 }
 
-void can_read(socket_info_t *info)
+void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
 {
-    static uint8_t readbuf[0xFFFF];
-    static struct sockaddr_storage recvaddr;
-    static socklen_t fromlen;
-    static ssize_t num_received;
     static dns_pkt_t packet;
     static uint8_t *parse_offset;
     static lookup_key_t search_key;
     static lookup_t *lookup;
 
-
-    fromlen = sizeof(recvaddr);
-    num_received = recvfrom(info->descriptor, readbuf, sizeof(readbuf), 0, (struct sockaddr *) &recvaddr, &fromlen);
-    if(num_received <= 0)
-    {
-        return;
-    }
-
     context.stats.current_rate++;
     context.stats.numreplies++;
 
-    if(!dns_parse_question(readbuf, (size_t)num_received, &packet.head, &parse_offset))
+    if(!dns_parse_question(offset, len, &packet.head, &parse_offset))
     {
         return;
     }
@@ -675,7 +707,7 @@ void can_read(socket_info_t *info)
 
         // Print packet
         time_t now = time(NULL);
-        uint16_t short_len = (uint16_t) num_received;
+        uint16_t short_len = (uint16_t) len;
         uint8_t *next = parse_offset;
         dns_record_t rec;
         size_t rec_index = 0;
@@ -685,20 +717,20 @@ void can_read(socket_info_t *info)
             case OUTPUT_BINARY:
                 // The output file is platform dependent for performance reasons.
                 fwrite(&now, sizeof(now), 1, context.outfile);
-                fwrite(&recvaddr, sizeof(recvaddr), 1, context.outfile);
+                fwrite(recvaddr, sizeof(*recvaddr), 1, context.outfile);
                 fwrite(&short_len, sizeof(short_len), 1, context.outfile);
-                fwrite(readbuf, short_len, 1, context.outfile);
+                fwrite(offset, short_len, 1, context.outfile);
                 break;
 
             case OUTPUT_TEXT_FULL: // Print packet similar to dig style
                 // Resolver and timestamp are not part of the packet, we therefore have to print it manually
                 fprintf(context.outfile, ";; Server: %s\n;; Size: %" PRIu16 "\n;; Unix time: %lu\n",
-                        sockaddr2str(&recvaddr), short_len, now);
-                dns_print_packet(context.outfile, &packet, readbuf, (size_t)num_received, next);
+                        sockaddr2str(recvaddr), short_len, now);
+                dns_print_packet(context.outfile, &packet, offset, len, next);
                 break;
 
             case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
-                while(dns_parse_record_raw(readbuf, next, readbuf + num_received, &next, &rec)
+                while(dns_parse_record_raw(offset, next, offset + len, &next, &rec)
                     && rec_index++ < packet.head.header.ans_count)
                 {
                     if(!dns_names_eq(&rec.name, &packet.head.question.name))
@@ -709,7 +741,7 @@ void can_read(socket_info_t *info)
                             "%s %s %s\n",
                             dns_name2str(&rec.name),
                             dns_record_type2str((dns_record_type) rec.type),
-                            dns_raw_record_data2str(&rec, readbuf, readbuf + short_len));
+                            dns_raw_record_data2str(&rec, offset, offset + short_len));
                 }
                 break;
         }
@@ -720,6 +752,75 @@ void can_read(socket_info_t *info)
             fflush(context.outfile);
         }
     }
+}
+
+#ifdef PCAP_SUPPORT
+void pcap_callback(u_char *arg, const struct pcap_pkthdr *header, const u_char *packet)
+{
+    static struct sockaddr_storage addr;
+    static size_t len;
+    static const uint8_t *frame;
+    static ssize_t remaining;
+
+    // We expect at least an Ethernet header + IPv4/IPv6 header (>= 20) + UDP header
+    if(header->len < 42)
+    {
+        return;
+    }
+    frame = ((uint8_t*)packet) + 14;
+    remaining = header->len - 14;
+
+    if(((struct ether_header*)packet)->ether_type == context.ether_type_ip)
+    {
+        unsigned int ip_hdr_len = ((struct iphdr *) frame)->ihl * 4;
+        remaining -= ip_hdr_len;
+
+        // Check whether the packet is long enough to still contain a UDP frame
+        if(((struct iphdr *) frame)->protocol != 17
+            || remaining < 0)
+        {
+            return;
+        }
+        frame += ip_hdr_len;
+        len = (size_t)remaining;
+        remaining -= ntohs(((struct udphdr *) frame)->len);
+        if(remaining != 0)
+        {
+            return;
+        }
+        frame += 8;
+        addr.ss_family = AF_INET;
+    }
+    else
+    {
+        return;
+    }
+    do_read((uint8_t*)frame, len, &addr);
+}
+
+void pcap_can_read()
+{
+    pcap_dispatch(context.pcap, 1, pcap_callback, NULL);
+}
+#endif
+
+void can_read(socket_info_t *info)
+{
+    static uint8_t readbuf[0xFFFF];
+    static struct sockaddr_storage recvaddr;
+    static socklen_t fromlen;
+    static ssize_t num_received;
+
+
+
+    fromlen = sizeof(recvaddr);
+    num_received = recvfrom(info->descriptor, readbuf, sizeof(readbuf), 0, (struct sockaddr *) &recvaddr, &fromlen);
+    if(num_received <= 0)
+    {
+        return;
+    }
+
+    do_read(readbuf, (size_t)num_received, &recvaddr);
 }
 
 bool cmp_lookup(void *lookup1, void *lookup2)
@@ -820,6 +921,171 @@ void privilege_drop()
     }
 }
 
+#ifdef PCAP_SUPPORT
+void pcap_setup()
+{
+    context.pcap_dev = pcap_lookupdev(context.pcap_error);
+    if(context.pcap_dev == NULL)
+    {
+        goto pcap_error;
+    }
+    fprintf(stderr, "Default pcap device: %s", context.pcap_dev);
+
+
+    char mac_filter[sizeof("ether dst ") - 1 + MAC_READABLE_BUFLEN];
+    char *mac_readable = mac_filter + sizeof("ether dst ") - 1;
+    strcpy(mac_filter, "ether dst ");
+
+    if(get_iface_hw_addr_readable(context.pcap_dev, mac_readable) != 0)
+    {
+        fprintf(stderr, "\nFailed to determine the hardware address of the device.\n");
+        goto pcap_error_noprint;
+    }
+    fprintf(stderr, ", address: %s\n", mac_readable);
+
+
+    context.pcap = pcap_create(context.pcap_dev, context.pcap_error);
+    if(context.pcap == NULL)
+    {
+        goto pcap_error;
+    }
+
+    if(pcap_set_snaplen(context.pcap, 0xFFFF) != 0)
+    {
+        goto pcap_error;
+    }
+
+    if(pcap_setnonblock(context.pcap, 1, context.pcap_error) == -1)
+    {
+        goto pcap_error;
+    }
+
+    if(pcap_set_buffer_size(context.pcap, 1024 * 1024) != 0)
+    {
+        goto pcap_error;
+    }
+
+    int activation_status = pcap_activate(context.pcap);
+    if(activation_status != 0)
+    {
+        fprintf(stderr, "Error during pcap activation: %s\n", pcap_statustostr(activation_status));
+        goto pcap_error_noprint;
+    }
+
+    if(pcap_compile(context.pcap, &context.pcap_filter, mac_filter, 0, PCAP_NETMASK_UNKNOWN) != 0)
+    {
+        fprintf(stderr, "Error during pcap filter compilation: %s\n", pcap_geterr(context.pcap));
+        goto pcap_error_noprint;
+    }
+
+    if(pcap_setfilter(context.pcap, &context.pcap_filter) != 0)
+    {
+        fprintf(stderr, "Error setting pcap filter: %s\n", pcap_geterr(context.pcap));
+        goto pcap_error_noprint;
+    }
+
+    context.pcap_info.descriptor = pcap_get_selectable_fd(context.pcap);
+    if(context.pcap_info.descriptor < 0)
+    {
+        goto pcap_error;
+    }
+
+    struct epoll_event ev;
+    bzero(&ev, sizeof(ev));
+    ev.data.ptr = &context.pcap_info;
+    ev.events = EPOLLIN;
+    if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.pcap_info.descriptor, &ev) != 0)
+    {
+        perror("Failed to add epoll event");
+        exit(EXIT_FAILURE);
+    }
+    return;
+
+pcap_error:
+    fprintf(stderr, "Error during pcap setup: %s\n", context.pcap_error);
+pcap_error_noprint:
+    cleanup();
+    exit(1);
+}
+#endif
+
+void init_pipes()
+{
+    // We don't need any pipes if the process is not forked
+    if(context.cmd_args.num_processes <= 1)
+    {
+        return;
+    }
+
+    // Otherwise create a unidirectional pipe for reading and writing from every fork
+    context.sockets.pipes = safe_malloc(sizeof(*context.sockets.pipes) * 2 * context.cmd_args.num_processes);
+    for(size_t i = 0; i < context.cmd_args.num_processes; i++)
+    {
+        if(pipe(context.sockets.pipes + i * 2) != 0)
+        {
+            perror("Pipe failed");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+}
+
+void setup_pipes()
+{
+    if(context.fork_index == 0) // We are in the main process
+    {
+        context.sockets.master_pipes_read = safe_calloc(sizeof(socket_info_t) * context.cmd_args.num_processes);
+
+        // Close all pipes that the children use to write
+        for (size_t i = 0; i < context.cmd_args.num_processes; i++)
+        {
+            close(context.sockets.pipes[2 * i + 1]);
+            context.sockets.pipes[2 * i + 1] = -1;
+
+            context.sockets.master_pipes_read[i].descriptor = context.sockets.pipes[2 * i];
+            context.sockets.master_pipes_read[i].type = SOCKET_TYPE_CONTROL;
+
+            // Add all pipes the main process can read from to the epoll descriptor
+            struct epoll_event ev;
+            bzero(&ev, sizeof(ev));
+            ev.data.ptr = &context.sockets.master_pipes_read[i];
+            ev.events = EPOLLIN;
+            if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.sockets.master_pipes_read[i].descriptor, &ev) != 0)
+            {
+                perror("Failed to add epoll event");
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+    else // It's a child process
+    {
+        // Close all pipes except the two belonging to the current process
+        for (size_t i = 0; i < context.cmd_args.num_processes; i++)
+        {
+            if (i == context.fork_index)
+            {
+                continue;
+            }
+            close(context.sockets.pipes[2 * i]);
+            close(context.sockets.pipes[2 * i + 1]);
+            context.sockets.pipes[2 * i] = -1;
+            context.sockets.pipes[2 * i + 1] = -1;
+        }
+        context.sockets.write_pipe.descriptor = context.sockets.pipes[2 * context.fork_index + 1];
+        context.sockets.write_pipe.type = SOCKET_TYPE_CONTROL;
+        close(context.sockets.pipes[2 * context.fork_index]);
+        context.sockets.pipes[2 * context.fork_index] = -1;
+    }
+}
+
+void read_control_message(socket_info_t *socket_info)
+{
+    size_t buf;
+
+    read(socket_info->descriptor, &buf, sizeof(buf));
+    printf("Control message: %lu\n", buf);
+}
+
 void run()
 {
     if(!urandom_init())
@@ -845,14 +1111,33 @@ void run()
     context.epollfd = epoll_create(1);
     timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
 
-    add_sockets(context.epollfd, EPOLLIN | EPOLLOUT, EPOLL_CTL_ADD, &context.sockets.interfaces4);
-    add_sockets(context.epollfd, EPOLLIN | EPOLLOUT, EPOLL_CTL_ADD, &context.sockets.interfaces6);
+    uint32_t socket_events = EPOLLOUT;
+#ifdef PCAP_SUPPORT
+    if(context.cmd_args.use_pcap)
+    {
+        pcap_setup();
+    }
+    else
+#endif
+    {
+        socket_events |= EPOLLIN;
+    }
+
+    add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces4);
+    add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
 
     struct epoll_event pevents[100000];
     bzero(pevents, sizeof(pevents));
 
     clock_gettime(CLOCK_MONOTONIC, &context.stats.start_time);
     check_progress();
+
+    init_pipes();
+    context.fork_index = split_process(context.cmd_args.num_processes);
+    if(context.cmd_args.num_processes > 1)
+    {
+        setup_pipes();
+    }
 
     while(context.state < STATE_DONE)
     {
@@ -878,6 +1163,16 @@ void run()
                 if ((pevents[i].events & EPOLLIN) && socket_info->type == SOCKET_TYPE_QUERY)
                 {
                     can_read(socket_info);
+                }
+#ifdef PCAP_SUPPORT
+                else if((pevents[i].events & EPOLLIN) && socket_info == &context.pcap_info)
+                {
+                    pcap_can_read();
+                }
+#endif
+                else if((pevents[i].events & EPOLLIN) && socket_info->type == SOCKET_TYPE_CONTROL)
+                {
+                    read_control_message(socket_info);
                 }
             }
             timed_ring_handle(&context.ring, ring_timeout);
@@ -906,6 +1201,11 @@ int parse_cmd(int argc, char **argv)
         return 1;
     }
 
+#ifdef PCAP_SUPPORT
+    // Precompute values so we do not have to call htons for each incoming packet
+    context.ether_type_ip = htons(ETHERTYPE_IP);
+    context.ether_type_ip6 = htons(ETHERTYPE_IPV6);
+#endif
 
     context.cmd_args.record_type = DNS_REC_INVALID;
     context.domainfile_size = -1;
@@ -919,6 +1219,7 @@ int parse_cmd(int argc, char **argv)
     context.cmd_args.timed_ring_buckets = 10000;
     context.cmd_args.output = OUTPUT_TEXT_FULL;
     context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = true;
+    context.cmd_args.num_processes = 1;
 
     for (int i = 1; i < argc; i++)
     {
@@ -1037,7 +1338,7 @@ int parse_cmd(int argc, char **argv)
         {
             context.cmd_args.norecurse = true;
         }
-        else if (strcmp(argv[i], "--output") == 0)
+        else if (strcmp(argv[i], "--output") == 0 || strcmp(argv[i], "-o") == 0)
         {
             expect_arg(i++);
             if(strchr(argv[i], 'B'))
@@ -1053,6 +1354,12 @@ int parse_cmd(int argc, char **argv)
                 context.cmd_args.output = OUTPUT_TEXT_FULL;
             }
         }
+#ifdef PCAP_SUPPORT
+        else if (strcmp(argv[i], "--use-pcap") == 0)
+        {
+            context.cmd_args.use_pcap = true;
+        }
+#endif
         else if (strcmp(argv[i], "--predictable-resolver") == 0)
         {
             context.cmd_args.predictable_resolver = true;
@@ -1080,6 +1387,20 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--hashmap-size") == 0 || strcmp(argv[i], "-s") == 0)
         {
             context.cmd_args.hashmap_size = (size_t) expect_arg_nonneg(i++, 1, SIZE_MAX);
+        }
+        else if (strcmp(argv[i], "--processes") == 0)
+        {
+            context.cmd_args.num_processes = (size_t) expect_arg_nonneg(i++, 0, SIZE_MAX);
+            if(context.cmd_args.num_processes == 0)
+            {
+                int cores = get_nprocs_conf();
+                if(cores <= 0)
+                {
+                    fprintf(stderr, "Failed to determine number of processor cores.\n");
+                    exit(1);
+                }
+                context.cmd_args.num_processes = (size_t)cores;
+            }
         }
         else if (strcmp(argv[i], "--interval") == 0 || strcmp(argv[i], "-i") == 0)
         {

@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 #include <fcntl.h>
+#include <net/if.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
 
 #define loop_sockets(sockets) \
         for (socket_info_t *socket = (sockets)->data; socket < ((socket_info_t*)(sockets)->data) + (sockets)->len; socket++)
@@ -128,6 +132,42 @@ bool str_to_addr(char *str, uint16_t default_port, struct sockaddr_storage *addr
         return true;
     }
     return false;
+}
+
+int get_iface_hw_addr(char *iface, uint8_t *hw_mac)
+{
+    int s;
+    struct ifreq buffer;
+
+    s = socket(PF_INET, SOCK_DGRAM, 0);
+    if (s < 0)
+    {
+        return EXIT_FAILURE;
+    }
+    bzero(&buffer, sizeof(buffer));
+    strncpy(buffer.ifr_name, iface, IFNAMSIZ);
+    ioctl(s, SIOCGIFHWADDR, &buffer);
+    close(s);
+    memcpy(hw_mac, buffer.ifr_hwaddr.sa_data, 6);
+    return EXIT_SUCCESS;
+}
+
+#define MAC_READABLE_BUFLEN 18
+
+int get_iface_hw_addr_readable(char *iface, char *hw_mac)
+{
+    uint8_t buffer[6];
+    int result = get_iface_hw_addr(iface, buffer);
+    for(uint8_t *b = buffer; b < buffer + 6; b++)
+    {
+        sprintf(hw_mac, "%02x:", *b);
+        hw_mac += 3;
+        if(b == buffer + 5)
+        {
+            *(hw_mac - 1) = 0;
+        }
+    }
+    return result;
 }
 
 #endif //MASSRESOLVER_NET_H

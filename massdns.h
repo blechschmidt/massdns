@@ -7,6 +7,10 @@
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+//#define PCAP_SUPPORT
+#ifdef PCAP_SUPPORT
+#include <pcap.h>
+#endif
 
 #include "list.h"
 #include "module.h"
@@ -118,6 +122,8 @@ typedef struct
         void (*help_function)();
         bool flush;
         bool predictable_resolver;
+        bool use_pcap;
+        size_t num_processes;
     } cmd_args;
 
     struct
@@ -127,6 +133,8 @@ typedef struct
         buffer_t queries; // Sockets used for sending out queries
         int *pipes;
         socket_info_t read_pipe;
+        socket_info_t write_pipe;
+        socket_info_t *master_pipes_read;
     } sockets;
 
     FILE* outfile;
@@ -158,7 +166,15 @@ typedef struct
         size_t mismatch_id;
         size_t mismatch_domain;
     } stats;
-
+#ifdef PCAP_SUPPORT
+    pcap_t *pcap;
+    char pcap_error[PCAP_ERRBUF_SIZE];
+    char *pcap_dev;
+    socket_info_t pcap_info;
+    uint16_t ether_type_ip;
+    uint16_t ether_type_ip6;
+    struct bpf_program pcap_filter;
+#endif
 } massdns_context_t;
 
 massdns_context_t context;

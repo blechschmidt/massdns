@@ -45,8 +45,8 @@ typedef enum
     DNS_REC_NSEC3PARAM = 51,
     DNS_REC_OPENPGPKEY = 61,
     DNS_REC_PTR = 12,
-    DNS_REC_RRSIG = 46,
     DNS_REC_RP = 17,
+    DNS_REC_RRSIG = 46,
     DNS_REC_SIG = 24,
     DNS_REC_SOA = 6,
     DNS_REC_SRV = 33,
@@ -72,7 +72,6 @@ dns_record_type dns_str_to_record_type(const char *str)
     // Performance is important here because we may want to use this when reading
     // large numbers of DNS queries from a file.
 
-    // TODO: Complete
     switch (tolower(str[0]))
     {
         case 'a':
@@ -107,6 +106,127 @@ dns_record_type dns_str_to_record_type(const char *str)
                 default:
                     return DNS_REC_INVALID;
             }
+        case 'c':
+            switch (tolower(str[1]))
+            {
+                case 'a':
+                    if (tolower(str[2]) == 'a' && str[3] == 0)
+                    {
+                        return DNS_REC_AAAA;
+                    }
+                    return DNS_REC_INVALID;
+                case 'd':
+                    switch(tolower(str[2]))
+                    {
+                        case 's':
+                            if(str[3] == 0)
+                            {
+                                DNS_REC_CDS;
+                            }
+                            return DNS_REC_INVALID;
+                        case 'n':
+                            if(tolower(str[3]) == 's' && tolower(str[4]) == 'k' && tolower(str[5]) == 'e'
+                                && tolower(str[6]) == 'y' && str[7] == 0)
+                            {
+                                return DNS_REC_CDNSKEY;
+                            }
+                        default:
+                            return DNS_REC_INVALID;
+                    }
+                case 'e':
+                    if(tolower(str[2]) == 'r' && tolower(str[3]) == 't' && str[4] == 0)
+                    {
+                        return DNS_REC_CERT;
+                    }
+                    return DNS_REC_INVALID;
+                case 'n':
+                    if(tolower(str[2]) == 'a' && tolower(str[3]) == 'm' && tolower(str[4]) == 'e' && str[5] == 0)
+                    {
+                        return DNS_REC_CNAME;
+                    }
+                    return DNS_REC_INVALID;
+                default:
+                    return DNS_REC_INVALID;
+            }
+        case 'd':
+            switch (tolower(str[1]))
+            {
+                case 'h':
+                    if(tolower(str[2]) == 'c' && tolower(str[3]) == 'i' && tolower(str[4]) == 'd' && str[5] == 0)
+                    {
+                        return DNS_REC_DHCID;
+                    }
+                    return DNS_REC_INVALID;
+                case 'l':
+                    if(tolower(str[2]) == 'v' && str[3] == 0)
+                    {
+                        return DNS_REC_DLV;
+                    }
+                    return DNS_REC_INVALID;
+                case 'n':
+                    switch(tolower(str[2]))
+                    {
+                        case 'a':
+                            if(tolower(str[3]) == 'm' && tolower(str[4]) == 'e' && str[5] == 0)
+                            {
+                                return DNS_REC_DNAME;
+                            }
+                            return DNS_REC_INVALID;
+                        case 's':
+                            if(tolower(str[3]) == 'k' && tolower(str[4]) == 'e' && tolower(str[5]) == 'y' && str[6] == 0)
+                            {
+                                return DNS_REC_DNSKEY;
+                            }
+                            return DNS_REC_INVALID;
+                        default:
+                            return DNS_REC_INVALID;
+                    }
+                case 's':
+                    if(str[2] == 0)
+                    {
+                        return DNS_REC_DS;
+                    }
+                    return DNS_REC_INVALID;
+                default:
+                    return DNS_REC_INVALID;
+            }
+        case 'h':
+            if (tolower(str[1]) == 'i' && tolower(str[2]) == 'p' && str[3] == 0)
+            {
+                return DNS_REC_HIP;
+            }
+            return DNS_REC_INVALID;
+        case 'i':
+            if (tolower(str[1]) == 'p' && tolower(str[2]) == 's' && tolower(str[3]) == 'e' && tolower(str[4]) == 'c'
+                && tolower(str[5]) == 'k' && tolower(str[6]) == 'e' && tolower(str[7]) == 'y' && str[8] == 0)
+            {
+                return DNS_REC_IPSECKEY;
+            }
+            return DNS_REC_INVALID;
+        case 'k':
+            switch(tolower(str[1]))
+            {
+                case 'e':
+                    if (tolower(str[2]) == 'y' && str[3] == 0)
+                    {
+                        return DNS_REC_KEY;
+                    }
+                    return DNS_REC_INVALID;
+                case 'x':
+                    if (str[2] == 0)
+                    {
+                        return DNS_REC_KX;
+                    }
+                    return DNS_REC_INVALID;
+                default:
+                    return DNS_REC_INVALID;
+            }
+        case 'l':
+            if (tolower(str[1]) == 'o' && tolower(str[2]) == 'c' && str[3] == 0)
+            {
+                return DNS_REC_LOC;
+            }
+            return DNS_REC_INVALID;
         case 'm':
             if (tolower(str[1]) == 'x' && str[2] == 0)
             {
@@ -114,9 +234,54 @@ dns_record_type dns_str_to_record_type(const char *str)
             }
             return DNS_REC_INVALID;
         case 'n':
-            if (tolower(str[1]) == 's' && str[2] == 0)
+            switch(tolower(str[1]))
             {
-                return DNS_REC_NS;
+                case 'a':
+                    if (tolower(str[2]) == 'p' && tolower(str[3]) == 't' && tolower(str[4]) == 'r' && str[5] == 0)
+                    {
+                        return DNS_REC_NAPTR;
+                    }
+                    return DNS_REC_INVALID;
+                case 's':
+                    switch(tolower(str[2]))
+                    {
+                        case 0:
+                            return DNS_REC_NS;
+                        case 'e':
+                            if(tolower(str[3]) == 'c')
+                            {
+                                switch(tolower(str[4]))
+                                {
+                                    case 0:
+                                        return DNS_REC_NSEC;
+                                    case '3':
+                                        if(str[5] == 0)
+                                        {
+                                            return DNS_REC_NSEC3;
+                                        }
+                                        if(tolower(str[5]) == 'p' && tolower(str[6]) == 'a' && tolower(str[7]) == 'r'
+                                            && tolower(str[8]) == 'a' && tolower(str[9]) == 'm' && str[10] == 0)
+                                        {
+                                            return DNS_REC_NSEC3PARAM;
+                                        }
+                                        return DNS_REC_INVALID;
+                                    default:
+                                        return DNS_REC_INVALID;
+                                }
+                            }
+                            return DNS_REC_INVALID;
+                        default:
+                            return DNS_REC_INVALID;
+                    }
+                default:
+                    return DNS_REC_INVALID;
+            }
+        case 'o':
+            if (tolower(str[1]) == 'p' && tolower(str[2]) == 'e' && tolower(str[3]) == 'n' && tolower(str[4]) == 'p'
+                && tolower(str[5]) == 'g' && tolower(str[6]) == 'p' && tolower(str[7]) == 'k' && tolower(str[8]) == 'e'
+                && tolower(str[9]) == 'y' && str[10] == 0)
+            {
+                return DNS_REC_OPENPGPKEY;
             }
             return DNS_REC_INVALID;
         case 'p':
@@ -125,13 +290,49 @@ dns_record_type dns_str_to_record_type(const char *str)
                 return DNS_REC_PTR;
             }
             return DNS_REC_INVALID;
+        case 'r':
+            switch(tolower(str[1]))
+            {
+                case 'p':
+                    if(str[2] == 0)
+                    {
+                        return DNS_REC_RP;
+                    }
+                    return DNS_REC_INVALID;
+                case 'r':
+                    if (tolower(str[2]) == 's' && tolower(str[3]) == 'i' && tolower(str[4]) == 'g' && str[5] == 0)
+                    {
+                        return DNS_REC_RRSIG;
+                    }
+                    return DNS_REC_INVALID;
+                default:
+                    return DNS_REC_INVALID;
+            }
         case 's':
             switch (tolower(str[1]))
             {
+                case 'i':
+                    if (tolower(str[2]) == 'g' && tolower(str[3]) == 0)
+                    {
+                        return DNS_REC_SIG;
+                    }
+                    return DNS_REC_INVALID;
                 case 'o':
                     if (tolower(str[2]) == 'a' && tolower(str[3]) == 0)
                     {
                         return DNS_REC_SOA;
+                    }
+                    return DNS_REC_INVALID;
+                case 'r':
+                    if (tolower(str[2]) == 'v' && tolower(str[3]) == 0)
+                    {
+                        return DNS_REC_SRV;
+                    }
+                    return DNS_REC_INVALID;
+                case 's':
+                    if (tolower(str[2]) == 'h' && tolower(str[3]) == 'f' && tolower(str[4]) == 'p' && str[5] == 0)
+                    {
+                        return DNS_REC_SSHFP;
                     }
                     return DNS_REC_INVALID;
                 default:
@@ -140,10 +341,46 @@ dns_record_type dns_str_to_record_type(const char *str)
         case 't':
             switch (tolower(str[1]))
             {
+                case 'a':
+                    if(str[2] == 0)
+                    {
+                        return DNS_REC_TA;
+                    }
+                    return DNS_REC_INVALID;
+                case 'k':
+                    if (tolower(str[2]) == 'e' && tolower(str[3]) == 'y' && str[4] == 0)
+                    {
+                        return DNS_REC_TKEY;
+                    }
+                    return DNS_REC_INVALID;
+                case 'l':
+                    if (tolower(str[2]) == 's' && tolower(str[3]) == 'a' && str[4] == 0)
+                    {
+                        return DNS_REC_TLSA;
+                    }
+                    return DNS_REC_INVALID;
+                case 's':
+                    if (tolower(str[2]) == 'i' && tolower(str[3]) == 'g' && str[4] == 0)
+                    {
+                        return DNS_REC_TSIG;
+                    }
+                    return DNS_REC_INVALID;
                 case 'x':
                     if (tolower(str[2]) == 't' && str[3] == 0)
                     {
                         return DNS_REC_TXT;
+                    }
+                    return DNS_REC_INVALID;
+                default:
+                    return DNS_REC_INVALID;
+            }
+        case 'u':
+            switch (tolower(str[1]))
+            {
+                case 'r':
+                    if (tolower(str[2]) == 'i' && str[3] == 0)
+                    {
+                        return DNS_REC_URI;
                     }
                     return DNS_REC_INVALID;
                 default:
@@ -409,19 +646,6 @@ static inline bool is_valid_label_char(int c)
     return isalnum(c) || c == '-' || c == '_';
 }
 
-static inline bool label_copy(uint8_t *dst, uint8_t *src, size_t len)
-{
-    for (size_t i = 0; i < len; i++)
-    {
-        if (!is_valid_label_char(*src))
-        {
-            return false;
-        }
-        *(dst++) = *(src++);
-    }
-    return true;
-}
-
 static bool parse_name(uint8_t *begin, uint8_t *buf, const uint8_t *end, uint8_t *name, uint8_t *len, uint8_t **next)
 {
     static uint8_t first;
@@ -489,11 +713,7 @@ static bool parse_name(uint8_t *begin, uint8_t *buf, const uint8_t *end, uint8_t
                 {
                     return false;
                 }
-                //memcpy(name, buf + 1, (size_t)label_len);
-                if (!label_copy(name, buf + 1, (size_t) label_len))
-                {
-                    return false;
-                }
+                memcpy(name, buf + 1, (size_t)label_len);
                 *(name + label_len) = '.';
                 name += label_len + 1;
                 buf += label_len + 1;

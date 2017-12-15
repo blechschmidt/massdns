@@ -95,6 +95,19 @@ buffer_t single_list_to_array(single_list_t *list)
     return buf;
 }
 
+buffer_t single_list_to_array_copy(single_list_t *list, size_t element_size)
+{
+    buffer_t buf;
+    buf.len = list->count;
+    buf.data = safe_malloc(element_size * list->count);
+    size_t i = 0;
+    single_list_ref_foreach(list, element)
+    {
+        memcpy(((uint8_t*)buf.data) + (i++) * element_size, element->data, element_size);
+    }
+    return buf;
+}
+
 single_list_t *single_list_new()
 {
     single_list_t *list = safe_calloc(sizeof(*list));
