@@ -45,6 +45,7 @@ void print_help()
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --output           Flags for output formatting.\n"
                     "      --predictable      Use resolvers incrementally. Useful for resolver tests.\n"
+                    "      --processes        Number of processes to be used for resolving. (Default: 1)\n"
                     "  -q  --quiet            Quiet mode.\n"
                     "      --rcvbuf           Size of the receive buffer in bytes.\n"
                     "      --retry            Unacceptable DNS response codes. (Default: REFUSED)\n"
@@ -486,7 +487,7 @@ void check_progress()
 
     // Go on with printing stats.
 
-    float progress = context.state == STATE_DONE ? 100 : 0;
+    float progress = context.state == STATE_DONE ? 1 : 0;
     if(context.domainfile_size > 0) // If the domain file is not a real file, the progress cannot be estimated.
     {
         // Get a rough estimate of the progress, only roughly proportional to the number of domains.
@@ -1136,6 +1137,7 @@ void setup_pipes()
 
             context.sockets.master_pipes_read[i].descriptor = context.sockets.pipes[2 * i];
             context.sockets.master_pipes_read[i].type = SOCKET_TYPE_CONTROL;
+            context.sockets.master_pipes_read[i].data = (void*)i;
 
             // Add all pipes the main process can read from to the epoll descriptor
             struct epoll_event ev;
@@ -1172,17 +1174,12 @@ void setup_pipes()
 
 void read_control_message(socket_info_t *socket_info)
 {
-    static stats_exchange_t stat_msg;
-
-    ssize_t read_result = read(socket_info->descriptor, &stat_msg, sizeof(stat_msg));
-    if(read_result < sizeof(stat_msg))
+    size_t process = (size_t)socket_info->data;
+    ssize_t read_result = read(socket_info->descriptor, context.stat_messages + process, sizeof(stats_exchange_t));
+    if(read_result < sizeof(stats_exchange_t))
     {
         fprintf(stderr, "Atomic read failed %ld.\n", read_result);
     }
-
-    // TODO: Remove this unnecessary copy by extending socket info.
-
-    context.stat_messages[stat_msg.fork_index] = stat_msg;
 
 }
 

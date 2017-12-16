@@ -35,6 +35,7 @@ typedef struct
     ip_support_t protocol;
     int descriptor;
     socket_type_t type;
+    void *data;
 } socket_info_t;
 
 void socket_noblock(socket_info_t* socket)
