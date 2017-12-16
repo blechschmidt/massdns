@@ -46,6 +46,21 @@ typedef struct
     size_t fakereplies; // used for resolver plausibility checks (wrong records)
 } resolver_stats_t;
 
+typedef struct {
+    size_t fork_index;
+    size_t numdomains;
+    size_t numreplies;
+    size_t finished;
+    size_t finished_success;
+    size_t mismatch_domain;
+    size_t mismatch_id;
+    size_t timeouts[0x100];
+    size_t all_rcodes[5];
+    size_t final_rcodes[5];
+    size_t current_rate;
+    size_t numparsed;
+} stats_exchange_t;
+
 typedef struct
 {
     struct sockaddr_storage address;
@@ -166,6 +181,7 @@ typedef struct
         size_t mismatch_id;
         size_t mismatch_domain;
     } stats;
+    stats_exchange_t *stat_messages;
 #ifdef PCAP_SUPPORT
     pcap_t *pcap;
     char pcap_error[PCAP_ERRBUF_SIZE];

@@ -36,6 +36,7 @@ void print_help()
                     "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
+                    "      --finalstats       Write final stats to STDERR when done.\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same\n"
@@ -43,7 +44,7 @@ void print_help()
                     "  -l  --error-log        Error log file path. (Default: /dev/stderr)\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --output           Flags for output formatting.\n"
-                    "      --finalstats       Write final stats to STDERR when done.\n"
+                    "      --predictable      Use resolvers incrementally. Useful for resolver tests.\n"
                     "  -q  --quiet            Quiet mode.\n"
                     "      --rcvbuf           Size of the receive buffer in bytes.\n"
                     "      --retry            Unacceptable DNS response codes. (Default: REFUSED)\n"
@@ -51,8 +52,11 @@ void print_help()
                     "      --root             Do not drop privileges when running as root. Not recommended.\n"
                     "  -s  --hashmap-size     Number of concurrent lookups. (Default: 100000)\n"
                     "      --sndbuf           Size of the send buffer in bytes.\n"
-                    "      --sticky-resolver  Do not switch the resolver when retrying.\n"
+                    "      --sticky           Do not switch the resolver when retrying.\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
+#ifdef PCAP_SUPPORT
+                    "      --use-pcap         Enable pcap usage.\n"
+#endif
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "  -x  --extreme          Value between 0 and 2 specifying transmission aggression. (Default: 0)\n"
                     "\n"
@@ -79,35 +83,34 @@ buffer_t massdns_resolvers_from_file(char *filename)
         if (fgets(line, sizeof(line), f))
         {
             trim_end(line);
-            struct sockaddr_storage *addr = safe_malloc(sizeof(addr));
+            resolver_t *resolver = safe_calloc(sizeof(*resolver));
+            struct sockaddr_storage *addr = &resolver->address;
             if (str_to_addr(line, 53, addr))
             {
                 if((addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0)
                     || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
                 {
-                    single_list_push_back(list, addr);
+                    single_list_push_back(list, resolver);
                 }
                 else
                 {
-                    free(addr);
                     fprintf(stderr, "No query socket for resolver \"%s\" found.\n", line);
                 }
             }
             else
             {
-                free(addr);
                 fprintf(stderr, "\"%s\" is not a valid resolver. Skipped.\n", line);
             }
         }
     }
     fclose(f);
-    buffer_t resolvers = single_list_to_array(list);
+    buffer_t resolvers = single_list_to_array_copy(list, sizeof(resolver_t));
     if(single_list_count(list) == 0)
     {
         fprintf(stderr, "No usable resolvers were found. Terminating.\n");
         exit(1);
     }
-    single_list_free(list);
+    single_list_free_with_elements(list);
     return resolvers;
 }
 
@@ -122,10 +125,6 @@ void cleanup()
     hashmapFree(context.map);
     timed_ring_destroy(&context.ring);
 
-    for(size_t i = 0; i < context.resolvers.len; i++)
-    {
-        free(((struct sockaddr_storage**)context.resolvers.data)[i]);
-    }
     free(context.resolvers.data);
 
     free(context.sockets.interfaces4.data);
@@ -142,9 +141,11 @@ void cleanup()
         fclose(context.outfile);
     }
 
-    free(context.sockets.pipes);
+    free(context.stat_messages);
 
-    free(context.sockets.master_pipes_read);
+    //free(context.sockets.pipes);
+
+    //free(context.sockets.master_pipes_read);
 
     for (size_t i = 0; i < context.cmd_args.num_processes * 2; i++)
     {
@@ -255,6 +256,7 @@ bool next_query(char **qname)
             continue;
         }
         *qname = line;
+
         return true;
     }
     return false;
@@ -353,11 +355,11 @@ void send_query(lookup_t *lookup)
     {
         if(context.cmd_args.predictable_resolver)
         {
-            lookup->resolver = ((resolver_t **) context.resolvers.data)[context.lookup_index % context.resolvers.len];
+            lookup->resolver = ((resolver_t *) context.resolvers.data) + context.lookup_index % context.resolvers.len;
         }
         else
         {
-            lookup->resolver = ((resolver_t **) context.resolvers.data)[urandom_size_t() % context.resolvers.len];
+            lookup->resolver = ((resolver_t *) context.resolvers.data) + urandom_size_t() % context.resolvers.len;
         }
     }
 
@@ -396,11 +398,70 @@ void send_query(lookup_t *lookup)
     }
 }
 
+#define STAT_IDX_OK 0
+#define STAT_IDX_NXDOMAIN 1
+#define STAT_IDX_SERVFAIL 2
+#define STAT_IDX_REFUSED 3
+#define STAT_IDX_FORMERR 4
+
+void my_stats_to_msg(stats_exchange_t *stats_msg)
+{
+    stats_msg->finished = context.stats.finished;
+    stats_msg->finished_success = context.stats.finished_success;
+    stats_msg->fork_index = context.fork_index;
+    stats_msg->mismatch_domain = context.stats.mismatch_domain;
+    stats_msg->mismatch_id = context.stats.mismatch_id;
+    stats_msg->numdomains = context.stats.numdomains;
+    stats_msg->numreplies = context.stats.numreplies;
+    stats_msg->all_rcodes[STAT_IDX_OK] = context.stats.all_rcodes[DNS_RCODE_OK];
+    stats_msg->all_rcodes[STAT_IDX_NXDOMAIN] = context.stats.all_rcodes[DNS_RCODE_NXDOMAIN];
+    stats_msg->all_rcodes[STAT_IDX_SERVFAIL] = context.stats.all_rcodes[DNS_RCODE_SERVFAIL];
+    stats_msg->all_rcodes[STAT_IDX_REFUSED] = context.stats.all_rcodes[DNS_RCODE_REFUSED];
+    stats_msg->all_rcodes[STAT_IDX_FORMERR] = context.stats.all_rcodes[DNS_RCODE_FORMERR];
+    stats_msg->final_rcodes[STAT_IDX_OK] = context.stats.final_rcodes[DNS_RCODE_OK];
+    stats_msg->final_rcodes[STAT_IDX_NXDOMAIN] = context.stats.final_rcodes[DNS_RCODE_NXDOMAIN];
+    stats_msg->final_rcodes[STAT_IDX_SERVFAIL] = context.stats.final_rcodes[DNS_RCODE_SERVFAIL];
+    stats_msg->final_rcodes[STAT_IDX_REFUSED] = context.stats.final_rcodes[DNS_RCODE_REFUSED];
+    stats_msg->final_rcodes[STAT_IDX_FORMERR] = context.stats.final_rcodes[DNS_RCODE_FORMERR];
+    stats_msg->current_rate = context.stats.current_rate;
+    stats_msg->numparsed = context.stats.numparsed;
+    for(size_t i = 0; i <= context.cmd_args.resolve_count; i++)
+    {
+        stats_msg->timeouts[i] = context.stats.timeouts[i];
+    }
+}
+
+void send_stats()
+{
+    static stats_exchange_t stats_msg;
+    
+    my_stats_to_msg(&stats_msg);
+
+    if(write(context.sockets.write_pipe.descriptor, &stats_msg, sizeof(stats_msg)) != sizeof(stats_msg))
+    {
+        fprintf(stderr, "Could not send stats atomically.\n");
+    }
+}
+
 void check_progress()
 {
     static struct timespec last_time;
     static char timeouts[4096];
     static struct timespec now;
+    static const char* stats_format = "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
+            "Processed queries: %zu\n"
+            "Received packets: %zu\n"
+            "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
+            "Current rate: %zu pps, average: %zu pps\n"
+            "Finished total: %zu, success: %zu (%.2f%%)\n"
+            "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
+            "Failures: %s\n"
+            "Response: | Success:               | Total:\n"
+            "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+            "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+            "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+            "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+            "FORMERR:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n";
 
     clock_gettime(CLOCK_MONOTONIC, &now);
 
@@ -411,26 +472,19 @@ void check_progress()
 
     // TODO: Hashmap size adaption logic will be handled here.
 
+    // Send the stats of the child to the parent process
+    if(context.cmd_args.num_processes > 1 && context.fork_index != 0)
+    {
+        send_stats();
+        goto end_stats;
+    }
+
     if(context.cmd_args.quiet)
     {
         return;
     }
 
-    // Send the stats of the child to the parent process
-    if(context.cmd_args.num_processes > 1 && context.fork_index != 0)
-    {
-        write(context.sockets.write_pipe.descriptor, &context.fork_index, sizeof(context.fork_index));
-    }
-
     // Go on with printing stats.
-
-    time_t total_elapsed_ns = (now.tv_sec - context.stats.start_time.tv_sec) * 1000000000
-        + (now.tv_nsec - context.stats.start_time.tv_nsec); // since last output
-    long long elapsed = now.tv_sec - context.stats.start_time.tv_sec; // resolution of one second should be okay
-    long long sec = elapsed % 60;
-    long long min = (elapsed / 60) % 60;
-    long long h = elapsed / 3600;
-    size_t average_pps = elapsed == 0 ? rate_pps : context.stats.numreplies * TIMED_RING_S / total_elapsed_ns;
 
     float progress = context.state == STATE_DONE ? 100 : 0;
     if(context.domainfile_size > 0) // If the domain file is not a real file, the progress cannot be estimated.
@@ -444,6 +498,13 @@ void check_progress()
         }
     }
 
+    time_t total_elapsed_ns = (now.tv_sec - context.stats.start_time.tv_sec) * 1000000000
+        + (now.tv_nsec - context.stats.start_time.tv_nsec); // since last output
+    long long elapsed = now.tv_sec - context.stats.start_time.tv_sec; // resolution of one second should be okay
+    long long sec = elapsed % 60;
+    long long min = (elapsed / 60) % 60;
+    long long h = elapsed / 3600;
+
     long long estimated_time = progress == 0 ? 0 : (long long)(elapsed / progress);
     if(estimated_time < elapsed)
     {
@@ -453,84 +514,114 @@ void check_progress()
     long long prog_min = (estimated_time / 60) % 60;
     long long prog_h = (estimated_time / 3600);
 
-
-    // Print the detailed timeout stats (number of tries before timeout) to the timeouts buffer.
-    int offset = 0;
-    for(size_t i = 0; i <= context.cmd_args.resolve_count; i++)
+#define stats_percent(a, b) ((b) == 0 ? 0 : (a) / (float) (b) * 100)
+#define stat_abs_share(a, b) a, stats_percent(a, b)
+#define rcode_stat(code) stat_abs_share(context.stats.final_rcodes[(code)], context.stats.finished_success),\
+        stat_abs_share(context.stats.all_rcodes[(code)], context.stats.numreplies)
+#define rcode_stat_multi(code) stat_abs_share(context.stat_messages[0].final_rcodes[(code)], \
+    context.stat_messages[0].finished_success),\
+        stat_abs_share(context.stat_messages[0].all_rcodes[(code)], context.stat_messages[0].numreplies)
+    
+    if(context.cmd_args.num_processes == 1)
     {
-        float share = context.stats.finished == 0 ?
-                      0 : context.stats.timeouts[i] * 100 / (float)context.stats.finished;
-        int result = snprintf(timeouts + offset, sizeof(timeouts) - offset, "%zu: %.2f%%, ", i, share);
-        if(result <= 0 || result >= sizeof(timeouts) - offset)
+        size_t average_pps = elapsed == 0 ? rate_pps : context.stats.numreplies * TIMED_RING_S / total_elapsed_ns;
+
+        // Print the detailed timeout stats (number of tries before timeout) to the timeouts buffer.
+        int offset = 0;
+        for (size_t i = 0; i <= context.cmd_args.resolve_count; i++)
         {
-            break;
+            float share = stats_percent(context.stats.timeouts[i], context.stats.finished);
+            int result = snprintf(timeouts + offset, sizeof(timeouts) - offset, "%zu: %.2f%%, ", i, share);
+            if (result <= 0 || result >= sizeof(timeouts) - offset)
+            {
+                break;
+            }
+            offset += result;
         }
-        offset += result;
+
+        fprintf(stderr,
+                stats_format,
+                context.stats.numdomains,
+                context.stats.numreplies,
+                progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
+                context.stats.finished,
+                stat_abs_share(context.stats.finished_success, context.stats.finished),
+                stat_abs_share(context.stats.mismatch_domain, context.stats.numreplies),
+                stat_abs_share(context.stats.mismatch_id, context.stats.numreplies),
+                timeouts,
+
+                rcode_stat(DNS_RCODE_OK),
+                rcode_stat(DNS_RCODE_NXDOMAIN),
+                rcode_stat(DNS_RCODE_SERVFAIL),
+                rcode_stat(DNS_RCODE_REFUSED),
+                rcode_stat(DNS_RCODE_FORMERR)
+        );
+    }
+    else
+    {
+        my_stats_to_msg(&context.stat_messages[0]);
+
+        for(size_t j = 1; j < context.cmd_args.num_processes; j++)
+        {
+            for (size_t i = 0; i <= context.cmd_args.resolve_count; i++)
+            {
+                context.stat_messages[0].timeouts[i] += context.stat_messages[j].timeouts[i];
+            }
+            context.stat_messages[0].numreplies += context.stat_messages[j].numreplies;
+            context.stat_messages[0].numparsed += context.stat_messages[j].numparsed;
+            context.stat_messages[0].numdomains += context.stat_messages[j].numdomains;
+            context.stat_messages[0].mismatch_id += context.stat_messages[j].mismatch_id;
+            context.stat_messages[0].mismatch_domain += context.stat_messages[j].mismatch_domain;
+            context.stat_messages[0].finished_success += context.stat_messages[j].finished_success;
+            context.stat_messages[0].finished += context.stat_messages[j].finished;
+            for(size_t i = 0; i < 5; i++)
+            {
+                context.stat_messages[0].all_rcodes[i] += context.stat_messages[j].all_rcodes[i];
+            }
+            for(size_t i = 0; i < 5; i++)
+            {
+                context.stat_messages[0].final_rcodes[i] += context.stat_messages[j].final_rcodes[i];
+            }
+            rate_pps += context.stat_messages[j].current_rate;
+        }
+
+        size_t average_pps = elapsed == 0 ? rate_pps :
+                             context.stat_messages[0].numreplies * TIMED_RING_S / total_elapsed_ns;
+
+
+        // Print the detailed timeout stats (number of tries before timeout) to the timeouts buffer.
+        int offset = 0;
+        for (size_t i = 0; i <= context.cmd_args.resolve_count; i++)
+        {
+            float share = stats_percent(context.stat_messages[0].timeouts[i], context.stat_messages[0].finished);
+            int result = snprintf(timeouts + offset, sizeof(timeouts) - offset, "%zu: %.2f%%, ", i, share);
+            if (result <= 0 || result >= sizeof(timeouts) - offset)
+            {
+                break;
+            }
+            offset += result;
+        }
+
+        fprintf(stderr,
+                stats_format,
+                context.stat_messages[0].numdomains,
+                context.stat_messages[0].numreplies,
+                progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
+                context.stat_messages[0].finished,
+                stat_abs_share(context.stat_messages[0].finished_success, context.stat_messages[0].finished),
+                stat_abs_share(context.stat_messages[0].mismatch_domain, context.stat_messages[0].numreplies),
+                stat_abs_share(context.stat_messages[0].mismatch_id, context.stat_messages[0].numreplies),
+                timeouts,
+
+                rcode_stat_multi(STAT_IDX_OK),
+                rcode_stat_multi(STAT_IDX_NXDOMAIN),
+                rcode_stat_multi(STAT_IDX_SERVFAIL),
+                rcode_stat_multi(STAT_IDX_REFUSED),
+                rcode_stat_multi(STAT_IDX_FORMERR)
+        );
     }
 
-    fprintf(stderr,
-            //"\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
-                "Processed queries: %zu\n"
-                "Received packets: %zu\n"
-                "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
-                "Current rate: %zu pps, average: %zu pps\n"
-                "Finished total: %zu, success: %zu (%.2f%%)\n"
-                "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
-                "Failures: %s\n"
-                "Response: | Success:               | Total:\n"
-                "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-                "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-                "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-                "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-                "FORMERR:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n",
-            context.stats.numdomains,
-            context.stats.numreplies,
-            progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
-            context.stats.finished, context.stats.finished_success,
-            context.stats.finished == 0 ? 0 : context.stats.finished_success / (float)context.stats.finished * 100,
-            context.stats.mismatch_domain,
-            context.stats.numreplies == 0 ? 0 : context.stats.mismatch_domain / (float)context.stats.numreplies * 100,
-            context.stats.mismatch_id,
-            context.stats.numreplies == 0 ? 0 : context.stats.mismatch_id / (float)context.stats.numreplies * 100,
-            timeouts,
-
-            context.stats.final_rcodes[DNS_RCODE_OK],
-            context.stats.finished_success == 0 ? 0 :
-            context.stats.final_rcodes[DNS_RCODE_OK] / (float)context.stats.finished_success * 100,
-            context.stats.all_rcodes[DNS_RCODE_OK],
-            context.stats.numparsed == 0 ? 0 :
-            context.stats.all_rcodes[DNS_RCODE_OK] / (float)context.stats.numparsed * 100,
-
-            context.stats.final_rcodes[DNS_RCODE_NXDOMAIN],
-            context.stats.finished_success == 0 ? 0 :
-            context.stats.final_rcodes[DNS_RCODE_NXDOMAIN] / (float)context.stats.finished_success * 100,
-            context.stats.all_rcodes[DNS_RCODE_NXDOMAIN],
-            context.stats.numparsed == 0 ? 0 :
-            context.stats.all_rcodes[DNS_RCODE_NXDOMAIN] / (float)context.stats.numparsed * 100,
-
-            context.stats.final_rcodes[DNS_RCODE_SERVFAIL],
-            context.stats.finished_success == 0 ? 0 :
-            context.stats.final_rcodes[DNS_RCODE_SERVFAIL] / (float)context.stats.finished_success * 100,
-            context.stats.all_rcodes[DNS_RCODE_SERVFAIL],
-            context.stats.numparsed == 0 ? 0 :
-            context.stats.all_rcodes[DNS_RCODE_SERVFAIL] / (float)context.stats.numparsed * 100,
-
-            context.stats.final_rcodes[DNS_RCODE_REFUSED],
-            context.stats.finished_success == 0 ? 0 :
-            context.stats.final_rcodes[DNS_RCODE_REFUSED] / (float)context.stats.finished_success * 100,
-            context.stats.all_rcodes[DNS_RCODE_REFUSED],
-            context.stats.numparsed == 0 ? 0 :
-            context.stats.all_rcodes[DNS_RCODE_REFUSED] / (float)context.stats.numparsed * 100,
-
-            context.stats.final_rcodes[DNS_RCODE_FORMERR],
-            context.stats.finished_success == 0 ? 0 :
-            context.stats.final_rcodes[DNS_RCODE_FORMERR] / (float)context.stats.finished_success * 100,
-            context.stats.all_rcodes[DNS_RCODE_FORMERR],
-            context.stats.numparsed == 0 ? 0 :
-            context.stats.all_rcodes[DNS_RCODE_FORMERR] / (float)context.stats.numparsed * 100
-            
-    );
-
+end_stats:
     // Call this function in about one second again
     timed_ring_add(&context.ring, TIMED_RING_S, check_progress);
 }
@@ -556,6 +647,7 @@ void can_send()
                 done();
             }
             break;
+            continue;
         }
         context.stats.numdomains++;
         lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
@@ -1080,10 +1172,18 @@ void setup_pipes()
 
 void read_control_message(socket_info_t *socket_info)
 {
-    size_t buf;
+    static stats_exchange_t stat_msg;
 
-    read(socket_info->descriptor, &buf, sizeof(buf));
-    printf("Control message: %lu\n", buf);
+    ssize_t read_result = read(socket_info->descriptor, &stat_msg, sizeof(stat_msg));
+    if(read_result < sizeof(stat_msg))
+    {
+        fprintf(stderr, "Atomic read failed %ld.\n", read_result);
+    }
+
+    // TODO: Remove this unnecessary copy by extending socket info.
+
+    context.stat_messages[stat_msg.fork_index] = stat_msg;
+
 }
 
 void run()
@@ -1099,16 +1199,10 @@ void run()
         binfile_write_head();
     }
 
-    // It is important to call default interface sockets setup before reading the resolver list
-    // because that way we can warn if the socket creation for a certain IP protocol failed although a resolver
-    // requires the protocol.
-    query_sockets_setup();
-    context.resolvers = massdns_resolvers_from_file(context.cmd_args.resolvers);
-
     privilege_drop();
 
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
-    context.epollfd = epoll_create(1);
+
     timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
 
     uint32_t socket_events = EPOLLOUT;
@@ -1123,21 +1217,34 @@ void run()
         socket_events |= EPOLLIN;
     }
 
-    add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces4);
-    add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
-
     struct epoll_event pevents[100000];
     bzero(pevents, sizeof(pevents));
 
-    clock_gettime(CLOCK_MONOTONIC, &context.stats.start_time);
-    check_progress();
-
     init_pipes();
     context.fork_index = split_process(context.cmd_args.num_processes);
+    context.epollfd = epoll_create(1);
     if(context.cmd_args.num_processes > 1)
     {
+        setvbuf(context.domainfile, NULL, _IONBF, 0);
         setup_pipes();
+        if(context.fork_index == 0)
+        {
+            context.stat_messages = safe_calloc(context.cmd_args.num_processes * sizeof(stats_exchange_t));
+        }
     }
+
+    // It is important to call default interface sockets setup before reading the resolver list
+    // because that way we can warn if the socket creation for a certain IP protocol failed although a resolver
+    // requires the protocol.
+    query_sockets_setup();
+    context.resolvers = massdns_resolvers_from_file(context.cmd_args.resolvers);
+
+    add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces4);
+    add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
+
+
+    clock_gettime(CLOCK_MONOTONIC, &context.stats.start_time);
+    check_progress();
 
     while(context.state < STATE_DONE)
     {
@@ -1360,11 +1467,11 @@ int parse_cmd(int argc, char **argv)
             context.cmd_args.use_pcap = true;
         }
 #endif
-        else if (strcmp(argv[i], "--predictable-resolver") == 0)
+        else if (strcmp(argv[i], "--predictable") == 0)
         {
             context.cmd_args.predictable_resolver = true;
         }
-        else if (strcmp(argv[i], "--sticky-resolver") == 0)
+        else if (strcmp(argv[i], "--sticky") == 0)
         {
             context.cmd_args.sticky = true;
         }
