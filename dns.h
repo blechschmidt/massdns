@@ -915,16 +915,15 @@ char *dns_record_type2str(dns_record_type type)
     }
 }
 
-// Requires a buffer of at least 272 bytes to be supplied
-static ssize_t dns_question_create(uint8_t *buffer, char *name, dns_record_type type, uint16_t id)
+ssize_t dns_str2namebuf(const char *name, uint8_t *buffer)
 {
     static uint8_t *bufname;
     static uint8_t *lenptr;
     static uint8_t total_len;
     static uint8_t label_len;
 
-    lenptr = buffer + 12; // points to the byte containing the label length
-    bufname = buffer + 13; // points to the first byte of the actual name
+    lenptr = buffer; // points to the byte containing the label length
+    bufname = buffer + 1; // points to the first byte of the actual name
     total_len = 0;
     label_len = 0;
 
@@ -967,12 +966,41 @@ static ssize_t dns_question_create(uint8_t *buffer, char *name, dns_record_type 
             }
         }
     }
+    return total_len + 1;
+}
+
+ssize_t dns_question_create_from_name(uint8_t *buffer, dns_name_t *name, dns_record_type type, uint16_t id)
+{
+    static uint8_t *aftername;
+
+    memcpy(buffer + 12, name->name, name->length);
+    aftername = buffer + 12 + name->length;
     dns_buffer_set_id(buffer, id);
     *((uint16_t *) (buffer + 2)) = 0;
-    *((uint16_t *) bufname) = htons(type);
-    *((uint16_t *) (bufname + 2)) = htons(DNS_CLS_IN);
+    *((uint16_t *) aftername) = htons(type);
+    *((uint16_t *) (aftername + 2)) = htons(DNS_CLS_IN);
     *((uint16_t *) (buffer + 4)) = htons(0x0001);
-    return bufname + 4 - buffer;
+    return aftername + 4 - buffer;
+}
+
+// Requires a buffer of at least 272 bytes to be supplied
+static ssize_t dns_question_create(uint8_t *buffer, char *name, dns_record_type type, uint16_t id)
+{
+    static uint8_t *aftername;
+
+    ssize_t name_len = dns_str2namebuf(name, buffer + 12);
+    if(name_len < 0)
+    {
+        return -1;
+    }
+    aftername = buffer + 12 + name_len;
+
+    dns_buffer_set_id(buffer, id);
+    *((uint16_t *) (buffer + 2)) = 0;
+    *((uint16_t *) aftername) = htons(type);
+    *((uint16_t *) (aftername + 2)) = htons(DNS_CLS_IN);
+    *((uint16_t *) (buffer + 4)) = htons(0x0001);
+    return aftername + 4 - buffer;
 }
 
 bool dns_send_question(uint8_t *buffer, char *name, dns_record_type type, uint16_t id, int fd, struct sockaddr_storage *addr)
@@ -1055,6 +1083,11 @@ bool dns_names_eq(dns_name_t *name1, dns_name_t *name2)
         }
     }
     return true;
+}
+
+bool dns_raw_names_eq(dns_name_t *name1, dns_name_t *name2)
+{
+    return name1->length == name2->length && memcmp(name1->name, name2->name, name1->length) == 0;
 }
 
 bool dns_parse_record_raw(uint8_t *begin, uint8_t *buf, const uint8_t *end, uint8_t **next, dns_record_t *record)

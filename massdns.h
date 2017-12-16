@@ -69,7 +69,7 @@ typedef struct
 
 typedef struct
 {
-    char *domain;
+    dns_name_t name;
     dns_record_type type;
 } lookup_key_t;
 
@@ -81,6 +81,12 @@ typedef struct
     resolver_t *resolver;
     lookup_key_t *key;
 } lookup_t;
+
+typedef struct
+{
+    lookup_key_t key;
+    lookup_t value;
+} lookup_entry_t;
 
 typedef enum
 {
@@ -102,6 +108,8 @@ const char *default_interfaces[] = {""};
 typedef struct
 {
     buffer_t resolvers;
+    lookup_entry_t *lookup_space;
+    buffer_t lookup_pool;
 
     struct
     {

@@ -48,7 +48,7 @@ void timed_ring_init(timed_ring_t* ring, size_t bucket_count, size_t precision, 
     {
         ring->buckets[i].count = 0;
         single_list_init(&ring->buckets[i].following);
-        ring->buckets[i].data = malloc(sizeof(void*) * bucket_capacity);
+        ring->buckets[i].data = safe_malloc(sizeof(void*) * bucket_capacity);
     }
     clock_gettime(CLOCK_MONOTONIC, &ring->last_time);
     ring->last_time.tv_nsec = (ring->last_time.tv_nsec / precision) * precision;

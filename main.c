@@ -38,7 +38,7 @@ void print_help()
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same\n"
-                    "                         domain. (Default: 200)\n"
+                    "                         domain. (Default: 500)\n"
                     "  -l  --error-log        Error log file path. (Default: /dev/stderr)\n"
                     "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --output           Flags for output formatting.\n"
@@ -67,6 +67,61 @@ void print_help()
     );
 }
 
+void cleanup()
+{
+#ifdef PCAP_SUPPORT
+    if(context.pcap != NULL)
+    {
+        pcap_close(context.pcap);
+    }
+#endif
+    if(context.map)
+    {
+        hashmapFree(context.map);
+    }
+    timed_ring_destroy(&context.ring);
+
+    free(context.resolvers.data);
+
+    free(context.sockets.interfaces4.data);
+    free(context.sockets.interfaces6.data);
+
+    urandom_close();
+
+    if(context.domainfile)
+    {
+        fclose(context.domainfile);
+    }
+    if(context.outfile)
+    {
+        fclose(context.outfile);
+    }
+
+    free(context.stat_messages);
+
+    free(context.sockets.pipes);
+
+    free(context.sockets.master_pipes_read);
+
+    free(context.lookup_pool.data);
+    free(context.lookup_space);
+
+    for (size_t i = 0; i < context.cmd_args.num_processes * 2; i++)
+    {
+        if(context.sockets.pipes && context.sockets.pipes[i] >= 0)
+        {
+            close(context.sockets.pipes[i]);
+        }
+    }
+}
+
+void clean_exit(int status)
+{
+    cleanup();
+    exit(status);
+}
+
+
 buffer_t massdns_resolvers_from_file(char *filename)
 {
     char line[4096];
@@ -74,7 +129,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
     if (f == NULL)
     {
         perror("Failed to open resolver file");
-        exit(1);
+        clean_exit(EXIT_FAILURE);
     }
     single_list_t *list = single_list_new();
     while (!feof(f))
@@ -107,52 +162,10 @@ buffer_t massdns_resolvers_from_file(char *filename)
     if(single_list_count(list) == 0)
     {
         fprintf(stderr, "No usable resolvers were found. Terminating.\n");
-        exit(1);
+        clean_exit(1);
     }
     single_list_free_with_elements(list);
     return resolvers;
-}
-
-void cleanup()
-{
-#ifdef PCAP_SUPPORT
-    if(context.pcap != NULL)
-    {
-        pcap_close(context.pcap);
-    }
-#endif
-    hashmapFree(context.map);
-    timed_ring_destroy(&context.ring);
-
-    free(context.resolvers.data);
-
-    free(context.sockets.interfaces4.data);
-    free(context.sockets.interfaces6.data);
-
-    urandom_close();
-
-    if(context.domainfile)
-    {
-        fclose(context.domainfile);
-    }
-    if(context.outfile)
-    {
-        fclose(context.outfile);
-    }
-
-    free(context.stat_messages);
-
-    //free(context.sockets.pipes);
-
-    //free(context.sockets.master_pipes_read);
-
-    for (size_t i = 0; i < context.cmd_args.num_processes * 2; i++)
-    {
-        if(context.sockets.pipes[i] >= 0)
-        {
-            close(context.sockets.pipes[i]);
-        }
-    }
 }
 
 void set_sndbuf(int fd)
@@ -266,7 +279,7 @@ bool next_query(char **qname)
 int hash_lookup_key(void *key)
 {
     unsigned long hash = 5381;
-    char *entry = ((lookup_key_t *)key)->domain;
+    uint8_t *entry = ((lookup_key_t *)key)->name.name;
     int c;
     while ((c = *entry++) != 0)
     {
@@ -274,6 +287,7 @@ int hash_lookup_key(void *key)
     }
     hash = ((hash << 5) + hash) + ((((lookup_key_t *)key)->type & 0xFF00) >> 8);
     hash = ((hash << 5) + hash) + (((lookup_key_t *)key)->type & 0x00FF);
+    hash = ((hash << 5) + hash) + ((lookup_key_t *)key)->name.length;
     return (int)hash;
 }
 
@@ -316,12 +330,28 @@ void end_warmup()
 
 lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
 {
-    lookup_key_t *key = safe_malloc(sizeof(*key));
+    //lookup_key_t *key = safe_malloc(sizeof(*key));
+    if(context.lookup_pool.len == 0)
+    {
+        fprintf(stderr, "Empty lookup pool.\n");
+        clean_exit(EXIT_FAILURE);
+    }
+    lookup_entry_t *entry = ((lookup_entry_t**)context.lookup_pool.data)[--context.lookup_pool.len];
+    lookup_key_t *key = &entry->key;
+    lookup_t *value = &entry->value;
+    bzero(value, sizeof(*value));
 
-    key->domain = canonicalized_name_copy(qname);
+
+    key->name.length = (uint8_t)string_copy((char*)key->name.name, qname, sizeof(key->name.name));
+    if(key->name.name[key->name.length - 1] != '.')
+    {
+        key->name.name[key->name.length] = '.';
+        key->name.name[++key->name.length] = 0;
+    }
+
     key->type = type;
 
-    lookup_t *value = safe_calloc(sizeof(*value));
+    //lookup_t *value = safe_calloc(sizeof(*value));
     value->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, value);
     urandom_get(&value->transaction, sizeof(value->transaction));
     value->key = key;
@@ -378,10 +408,11 @@ void send_query(lookup_t *lookup)
     size_t socket_index = urandom_size_t() % interfaces->len;
     int socket_descriptor = ((socket_info_t*)interfaces->data)[socket_index].descriptor;
 
-    ssize_t result = dns_question_create(query_buffer, lookup->key->domain, lookup->key->type, lookup->transaction);
+    ssize_t result = dns_question_create(query_buffer, (char*)lookup->key->name.name, lookup->key->type,
+                                                   lookup->transaction);
     if (result < DNS_PACKET_MINIMUM_SIZE)
     {
-        fprintf(stderr, "Failed to create DNS question for query \"%s\".", lookup->key->domain);
+        fprintf(stderr, "Failed to create DNS question for query \"%s\".", lookup->key->name.name);
         return;
     }
 
@@ -451,7 +482,7 @@ void check_progress()
             "Processed queries: %zu\n"
             "Received packets: %zu\n"
             "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
-            "Current rate: %zu pps, average: %zu pps\n"
+            "Current incoming rate: %zu pps, average: %zu pps\n"
             "Finished total: %zu, success: %zu (%.2f%%)\n"
             "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
             "Failures: %s\n"
@@ -515,10 +546,10 @@ void check_progress()
 #define stats_percent(a, b) ((b) == 0 ? 0 : (a) / (float) (b) * 100)
 #define stat_abs_share(a, b) a, stats_percent(a, b)
 #define rcode_stat(code) stat_abs_share(context.stats.final_rcodes[(code)], context.stats.finished_success),\
-        stat_abs_share(context.stats.all_rcodes[(code)], context.stats.numreplies)
+        stat_abs_share(context.stats.all_rcodes[(code)], context.stats.numparsed)
 #define rcode_stat_multi(code) stat_abs_share(context.stat_messages[0].final_rcodes[(code)], \
     context.stat_messages[0].finished_success),\
-        stat_abs_share(context.stat_messages[0].all_rcodes[(code)], context.stat_messages[0].numreplies)
+        stat_abs_share(context.stat_messages[0].all_rcodes[(code)], context.stat_messages[0].numparsed)
     
     if(context.cmd_args.num_processes == 1)
     {
@@ -544,8 +575,8 @@ void check_progress()
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
                 context.stats.finished,
                 stat_abs_share(context.stats.finished_success, context.stats.finished),
-                stat_abs_share(context.stats.mismatch_domain, context.stats.numreplies),
-                stat_abs_share(context.stats.mismatch_id, context.stats.numreplies),
+                stat_abs_share(context.stats.mismatch_domain, context.stats.numparsed),
+                stat_abs_share(context.stats.mismatch_id, context.stats.numparsed),
                 timeouts,
 
                 rcode_stat(DNS_RCODE_OK),
@@ -607,8 +638,8 @@ void check_progress()
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
                 context.stat_messages[0].finished,
                 stat_abs_share(context.stat_messages[0].finished_success, context.stat_messages[0].finished),
-                stat_abs_share(context.stat_messages[0].mismatch_domain, context.stat_messages[0].numreplies),
-                stat_abs_share(context.stat_messages[0].mismatch_id, context.stat_messages[0].numreplies),
+                stat_abs_share(context.stat_messages[0].mismatch_domain, context.stat_messages[0].numparsed),
+                stat_abs_share(context.stat_messages[0].mismatch_id, context.stat_messages[0].numparsed),
                 timeouts,
 
                 rcode_stat_multi(STAT_IDX_OK),
@@ -668,9 +699,9 @@ void lookup_done(lookup_t *lookup)
     context.stats.finished++;
 
     hashmapRemove(context.map, lookup->key);
-    free(lookup->key->domain);
-    free(lookup->key);
-    free(lookup);
+
+    // Return lookup to pool.
+    ((lookup_key_t**)context.lookup_pool.data)[context.lookup_pool.len++] = lookup->key;
 
 
     // When transmission is not aggressive, we only start a new lookup after another one has finished.
@@ -748,7 +779,6 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
 {
     static dns_pkt_t packet;
     static uint8_t *parse_offset;
-    static lookup_key_t search_key;
     static lookup_t *lookup;
 
     context.stats.current_rate++;
@@ -762,9 +792,9 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     context.stats.numparsed++;
     context.stats.all_rcodes[packet.head.header.rcode]++;
 
-    search_key.type = packet.head.question.type;
-    search_key.domain = (char*)packet.head.question.name.name;
-    lookup = hashmapGet(context.map, &search_key);
+    // TODO: Remove unnecessary copy.
+    //search_key.domain = (char*)packet.head.question.name.name;
+    lookup = hashmapGet(context.map, &packet.head.question);
     if(!lookup) // Most likely reason: delayed response after duplicate query
     {
         context.stats.mismatch_domain++;
@@ -916,7 +946,8 @@ void can_read(socket_info_t *info)
 
 bool cmp_lookup(void *lookup1, void *lookup2)
 {
-    return strcasecmp(((lookup_key_t *) lookup1)->domain,((lookup_key_t *) lookup2)->domain) == 0;
+    return dns_names_eq(&((lookup_key_t *) lookup1)->name, &((lookup_key_t *) lookup1)->name);
+    //return strcasecmp(((lookup_key_t *) lookup1)->domain,((lookup_key_t *) lookup2)->domain) == 0;
 }
 
 void binfile_write_head()
@@ -1000,7 +1031,7 @@ void privilege_drop()
                 "For security reasons, this program will only run as root user when supplied with --root"
                 "which is not recommended.\n"
                 "It is better practice to run this program as a different user.\n", username);
-            exit(1);
+            clean_exit(1);
         }
     }
     else
@@ -1088,7 +1119,7 @@ void pcap_setup()
     if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.pcap_info.descriptor, &ev) != 0)
     {
         perror("Failed to add epoll event");
-        exit(EXIT_FAILURE);
+        clean_exit(EXIT_FAILURE);
     }
     return;
 
@@ -1096,7 +1127,7 @@ pcap_error:
     fprintf(stderr, "Error during pcap setup: %s\n", context.pcap_error);
 pcap_error_noprint:
     cleanup();
-    exit(1);
+    clean_exit(1);
 }
 #endif
 
@@ -1115,7 +1146,7 @@ void init_pipes()
         if(pipe(context.sockets.pipes + i * 2) != 0)
         {
             perror("Pipe failed");
-            exit(EXIT_FAILURE);
+            clean_exit(EXIT_FAILURE);
         }
     }
 
@@ -1145,7 +1176,7 @@ void setup_pipes()
             if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.sockets.master_pipes_read[i].descriptor, &ev) != 0)
             {
                 perror("Failed to add epoll event");
-                exit(EXIT_FAILURE);
+                clean_exit(EXIT_FAILURE);
             }
         }
     }
@@ -1188,7 +1219,7 @@ void run()
     if(!urandom_init())
     {
         fprintf(stderr, "Failed to open /dev/urandom: %s\n", strerror(errno));
-        exit(1);
+        clean_exit(1);
     }
 
     if(context.cmd_args.output == OUTPUT_BINARY)
@@ -1197,10 +1228,30 @@ void run()
     }
 
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
+    if(context.map == NULL)
+    {
+        fprintf(stderr, "Failed to create hashmap.\n");
+        clean_exit(EXIT_FAILURE);
+    }
+
+    context.lookup_pool.len = context.cmd_args.hashmap_size * 2;
+    context.lookup_pool.data = safe_calloc(context.lookup_pool.len * sizeof(void*));
+    context.lookup_space = safe_calloc(context.lookup_pool.len * sizeof(*context.lookup_space));
+    for(size_t i = 0; i < context.lookup_pool.len; i++)
+    {
+        ((lookup_entry_t**)context.lookup_pool.data)[i] = context.lookup_space + i;
+    }
 
     timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
 
     uint32_t socket_events = EPOLLOUT;
+
+    struct epoll_event pevents[100000];
+    bzero(pevents, sizeof(pevents));
+
+    init_pipes();
+    context.fork_index = split_process(context.cmd_args.num_processes);
+    context.epollfd = epoll_create(1);
 #ifdef PCAP_SUPPORT
     if(context.cmd_args.use_pcap)
     {
@@ -1211,16 +1262,8 @@ void run()
     {
         socket_events |= EPOLLIN;
     }
-
-    struct epoll_event pevents[100000];
-    bzero(pevents, sizeof(pevents));
-
-    init_pipes();
-    context.fork_index = split_process(context.cmd_args.num_processes);
-    context.epollfd = epoll_create(1);
     if(context.cmd_args.num_processes > 1)
     {
-        setvbuf(context.domainfile, NULL, _IONBF, 0);
         setup_pipes();
         if(context.fork_index == 0)
         {
@@ -1243,7 +1286,7 @@ void run()
         if(!context.outfile)
         {
             perror("Failed to open output file");
-            exit(EXIT_FAILURE);
+            clean_exit(EXIT_FAILURE);
         }
     }
     else
@@ -1251,11 +1294,9 @@ void run()
         if(context.cmd_args.num_processes > 1)
         {
             fprintf(stderr, "Multiprocessing is currently only supported through the -w parameter.\n");
-            exit(EXIT_FAILURE);
+            clean_exit(EXIT_FAILURE);
         }
     }
-
-    privilege_drop();
 
 
     // It is important to call default interface sockets setup before reading the resolver list
@@ -1263,6 +1304,8 @@ void run()
     // requires the protocol.
     query_sockets_setup();
     context.resolvers = massdns_resolvers_from_file(context.cmd_args.resolvers);
+
+    privilege_drop();
 
     add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces4);
     add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
@@ -1348,7 +1391,7 @@ int parse_cmd(int argc, char **argv)
 
     context.cmd_args.resolve_count = 50;
     context.cmd_args.hashmap_size = 100000;
-    context.cmd_args.interval_ms = 1000;
+    context.cmd_args.interval_ms = 500;
     context.cmd_args.timed_ring_buckets = 10000;
     context.cmd_args.output = OUTPUT_TEXT_FULL;
     context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = true;
@@ -1522,7 +1565,7 @@ int parse_cmd(int argc, char **argv)
                 if(cores <= 0)
                 {
                     fprintf(stderr, "Failed to determine number of processor cores.\n");
-                    exit(1);
+                    clean_exit(1);
                 }
                 context.cmd_args.num_processes = (size_t)cores;
             }
@@ -1560,7 +1603,7 @@ int parse_cmd(int argc, char **argv)
                     if (context.domainfile == NULL)
                     {
                         fprintf(stderr, "Failed to open domain file \"%s\".\n", argv[i]);
-                        exit(1);
+                        clean_exit(1);
                     }
                     if(fseek(context.domainfile, 0, SEEK_END) != 0)
                     {
