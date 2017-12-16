@@ -114,6 +114,7 @@ typedef struct
         bool root;
         char *resolvers;
         char *domains;
+        char *outfile_name;
         uint8_t resolve_count;
         size_t hashmap_size;
         unsigned int interval_ms;

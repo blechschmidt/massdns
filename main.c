@@ -1,7 +1,5 @@
 #define _GNU_SOURCE
 
-#define DEBUG
-
 #ifdef DEBUG
 #include <sys/resource.h>
 #endif
@@ -469,7 +467,6 @@ void check_progress()
     time_t elapsed_ns = (now.tv_sec - last_time.tv_sec) * 1000000000 + (now.tv_nsec - last_time.tv_nsec);
     size_t rate_pps = elapsed_ns == 0 ? 0 : context.stats.current_rate * TIMED_RING_S / elapsed_ns;
     last_time = now;
-    context.stats.current_rate = 0;
 
     // TODO: Hashmap size adaption logic will be handled here.
 
@@ -623,6 +620,7 @@ void check_progress()
     }
 
 end_stats:
+    context.stats.current_rate = 0;
     // Call this function in about one second again
     timed_ring_add(&context.ring, TIMED_RING_S, check_progress);
 }
@@ -1185,6 +1183,8 @@ void read_control_message(socket_info_t *socket_info)
 
 void run()
 {
+    static char multiproc_outfile_name[8192];
+
     if(!urandom_init())
     {
         fprintf(stderr, "Failed to open /dev/urandom: %s\n", strerror(errno));
@@ -1195,8 +1195,6 @@ void run()
     {
         binfile_write_head();
     }
-
-    privilege_drop();
 
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
 
@@ -1229,6 +1227,36 @@ void run()
             context.stat_messages = safe_calloc(context.cmd_args.num_processes * sizeof(stats_exchange_t));
         }
     }
+
+    if(strcmp(context.cmd_args.outfile_name, "-") != 0)
+    {
+        if(context.cmd_args.num_processes > 1)
+        {
+            snprintf(multiproc_outfile_name, sizeof(multiproc_outfile_name), "%s%zd", context.cmd_args.outfile_name,
+            context.fork_index);
+            context.outfile = fopen(multiproc_outfile_name, "w");
+        }
+        else
+        {
+            context.outfile = fopen(context.cmd_args.outfile_name, "w");
+        }
+        if(!context.outfile)
+        {
+            perror("Failed to open output file");
+            exit(EXIT_FAILURE);
+        }
+    }
+    else
+    {
+        if(context.cmd_args.num_processes > 1)
+        {
+            fprintf(stderr, "Multiprocessing is currently only supported through the -w parameter.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    privilege_drop();
+
 
     // It is important to call default interface sockets setup before reading the resolver list
     // because that way we can warn if the socket creation for a certain IP protocol failed although a resolver
@@ -1316,6 +1344,7 @@ int parse_cmd(int argc, char **argv)
     context.state = STATE_WARMUP;
     context.logfile = stderr;
     context.outfile = stdout;
+    context.cmd_args.outfile_name = "-";
 
     context.cmd_args.resolve_count = 50;
     context.cmd_args.hashmap_size = 100000;
@@ -1387,16 +1416,8 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--outfile") == 0 || strcmp(argv[i], "-w") == 0)
         {
             expect_arg(i);
-            char *filename = argv[++i];
-            if(strcmp(filename, "-") != 0)
-            {
-                context.outfile = fopen(filename, "w");
-                if(!context.outfile)
-                {
-                    perror("Failed to open output file");
-                    return 1;
-                }
-            }
+            context.cmd_args.outfile_name = argv[++i];
+
         }
         else if (strcmp(argv[i], "--error-log") == 0 || strcmp(argv[i], "-l") == 0)
         {
