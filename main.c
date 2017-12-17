@@ -838,7 +838,8 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         uint16_t short_len = (uint16_t) len;
         uint8_t *next = parse_offset;
         dns_record_t rec;
-        size_t rec_index = 0;
+        size_t non_add_count = packet.head.header.ans_count + packet.head.header.auth_count;
+        dns_section_t section = DNS_SECTION_ANSWER;
 
         switch(context.cmd_args.output)
         {
@@ -858,18 +859,43 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 break;
 
             case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
-                while(dns_parse_record_raw(offset, next, offset + len, &next, &rec)
-                    && rec_index++ < packet.head.header.ans_count)
+                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
                 {
-                    if(!dns_names_eq(&rec.name, &packet.head.question.name))
+                    if(rec_index >= packet.head.header.ans_count)
+                    {
+                        if(rec_index >= non_add_count)
+                        {
+                            section = DNS_SECTION_ADDITIONAL;
+                        }
+                        else
+                        {
+                            section = DNS_SECTION_AUTHORITY;
+                        }
+                    }
+
+                    if((context.format.match_name && !dns_names_eq(&rec.name, &packet.head.question.name))
+                            || !context.format.sections[section])
                     {
                         continue;
                     }
-                    fprintf(context.outfile,
-                            "%s %s %s\n",
-                            dns_name2str(&rec.name),
-                            dns_record_type2str((dns_record_type) rec.type),
-                            dns_raw_record_data2str(&rec, offset, offset + short_len));
+                    if(!context.format.ttl)
+                    {
+                        fprintf(context.outfile,
+                                "%s %s %s\n",
+                                dns_name2str(&rec.name),
+                                dns_record_type2str((dns_record_type) rec.type),
+                                dns_raw_record_data2str(&rec, offset, offset + short_len));
+                    }
+                    else
+                    {
+                        fprintf(context.outfile,
+                                "%s %s %" PRIu16 " %s %s\n",
+                                dns_name2str(&rec.name),
+                                dns_class2str((dns_class)rec.class),
+                                rec.ttl,
+                                dns_record_type2str((dns_record_type) rec.type),
+                                dns_raw_record_data2str(&rec, offset, offset + short_len));
+                    }
                 }
                 break;
         }
@@ -1229,11 +1255,6 @@ void run()
         clean_exit(1);
     }
 
-    if(context.cmd_args.output == OUTPUT_BINARY)
-    {
-        binfile_write_head();
-    }
-
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
     if(context.map == NULL)
     {
@@ -1303,6 +1324,11 @@ void run()
             fprintf(stderr, "Multiprocessing is currently only supported through the -w parameter.\n");
             clean_exit(EXIT_FAILURE);
         }
+    }
+
+    if(context.cmd_args.output == OUTPUT_BINARY)
+    {
+        binfile_write_head();
     }
 
 
@@ -1395,6 +1421,9 @@ int parse_cmd(int argc, char **argv)
     context.logfile = stderr;
     context.outfile = stdout;
     context.cmd_args.outfile_name = "-";
+
+    context.format.match_name = true;
+    context.format.sections[DNS_SECTION_ANSWER] = true;
 
     context.cmd_args.resolve_count = 50;
     context.cmd_args.hashmap_size = 10000;
@@ -1524,6 +1553,36 @@ int parse_cmd(int argc, char **argv)
             else if(strchr(argv[i], 'S'))
             {
                 context.cmd_args.output = OUTPUT_TEXT_SIMPLE;
+
+                if(strcmp(argv[i], "S") != 0)
+                {
+                    context.format.sections[DNS_SECTION_ANSWER] = false;
+                    context.format.match_name = false;
+                }
+                for(char *output_option = argv[i] + 1; *output_option != 0; output_option++)
+                {
+                    switch(*output_option)
+                    {
+                        case 'u':
+                            context.format.sections[DNS_SECTION_AUTHORITY] = true;
+                            break;
+                        case 'd':
+                            context.format.sections[DNS_SECTION_ADDITIONAL] = true;
+                            break;
+                        case 'n':
+                            context.format.sections[DNS_SECTION_ANSWER] = true;
+                            break;
+                        case 'm':
+                            context.format.match_name = true;
+                            break;
+                        case 't':
+                            context.format.ttl = true;
+                            break;
+                        default:
+                            fprintf(stderr, "Unrecognized output option: %c\n", *output_option);
+                            clean_exit(EXIT_FAILURE);
+                    }
+                }
             }
             else if(strchr(argv[i], 'F'))
             {

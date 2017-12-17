@@ -118,6 +118,14 @@ typedef struct
         size_t count;
     } modules;
 
+    struct
+    {
+        bool sections[4];
+
+        bool match_name;
+        bool ttl;
+    } format;
+
     struct cmd_args
     {
         bool root;

@@ -61,10 +61,10 @@ typedef enum
 
 typedef enum
 {
-    DNS_SECTION_QUESTION,
-    DNS_SECTION_ANSWER,
-    DNS_SECTION_AUTHORITY,
-    DNS_SECTION_ADDITIONAL
+    DNS_SECTION_QUESTION = 0,
+    DNS_SECTION_ANSWER = 1,
+    DNS_SECTION_AUTHORITY = 2,
+    DNS_SECTION_ADDITIONAL = 3
 } dns_section_t;
 
 dns_record_type dns_str_to_record_type(const char *str)
@@ -112,7 +112,7 @@ dns_record_type dns_str_to_record_type(const char *str)
                 case 'a':
                     if (tolower(str[2]) == 'a' && str[3] == 0)
                     {
-                        return DNS_REC_AAAA;
+                        return DNS_REC_CAA;
                     }
                     return DNS_REC_INVALID;
                 case 'd':
@@ -1342,6 +1342,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
                     break;
                 }
             }
+            *ptr = 0;
             break;
         }
         case DNS_REC_SOA:
@@ -1391,9 +1392,30 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             }
             inet_ntop(AF_INET6, record->data.raw, buf, sizeof(buf));
             break;
+        case DNS_REC_CAA:
+            if(record->length < 2 || record->data.raw[1] < 1 || record->data.raw[1] > 15
+               || record->data.raw[1] + 2 > record->length)
+            {
+                goto raw;
+            }
+            int written = sprintf(ptr, "%" PRIu8 " ", record->data.raw[0] >> 7);
+            if(written < 0)
+            {
+                return buf;
+            }
+            ptr += written;
+            dns_print_readable(&ptr, sizeof(buf), record->data.raw + 2, record->data.raw[1]);
+            *(ptr++) = ' ';
+            *(ptr++) = '"';
+            dns_print_readable(&ptr, sizeof(buf), record->data.raw + 2 + record->data.raw[1],
+                               record->length - record->data.raw[1] - 2);
+            *(ptr++) = '"';
+            *ptr = 0;
+            break;
         raw:
         default:
             dns_print_readable(&ptr, sizeof(buf), record->data.raw, record->length);
+            *ptr = 0;
     }
     return buf;
 }
