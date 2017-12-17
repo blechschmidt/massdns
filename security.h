@@ -28,6 +28,18 @@ void *safe_malloc(size_t n)
     return ptr;
 }
 
+void *safe_realloc(void *orig, size_t n)
+{
+    void *ptr = realloc(orig, n);
+    // Check for successful allocation
+    if(ptr == NULL)
+    {
+        perror("Memory allocation failed");
+        abort();
+    }
+    return ptr;
+}
+
 /**
  * Safely allocate memory on the heap and initialize it with zeroes by aborting on failure.
  *

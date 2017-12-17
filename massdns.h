@@ -80,6 +80,7 @@ typedef struct
     void **ring_entry; // pointer to the entry within the timed ring for entry invalidation
     resolver_t *resolver;
     lookup_key_t *key;
+    socket_info_t *socket;
 } lookup_t;
 
 typedef struct
@@ -148,6 +149,7 @@ typedef struct
         bool predictable_resolver;
         bool use_pcap;
         size_t num_processes;
+        size_t socket_count;
     } cmd_args;
 
     struct

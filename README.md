@@ -23,11 +23,11 @@ Usage: ./bin/massdns [options] [domainlist]
   -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
       --drop-user        User to drop privileges to when running as root. (Default: nobody)
-      --finalstats       Write final stats to STDERR when done. Currently broken.
+      --finalstats       Write final stats to STDERR when done.
       --flush            Flush the output file whenever a response was received.
   -h  --help             Show this help.
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same
-                         domain. (Default: 200)
+                         domain. (Default: 500)
   -l  --error-log        Error log file path. (Default: /dev/stderr)
   -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
   -o  --output           Flags for output formatting.
@@ -38,9 +38,10 @@ Usage: ./bin/massdns [options] [domainlist]
       --retry            Unacceptable DNS response codes. (Default: REFUSED)
   -r  --resolvers        Text file containing DNS resolvers.
       --root             Do not drop privileges when running as root. Not recommended.
-  -s  --hashmap-size     Number of concurrent lookups. (Default: 100000)
+  -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)
       --sndbuf           Size of the send buffer in bytes.
       --sticky           Do not switch the resolver when retrying.
+      --socket-count     Socket count per process. (Default: 1)
   -t  --type             Record type to be resolved. (Default: A)
   -w  --outfile          Write to the specified output file instead of standard output.
   -x  --extreme          Value between 0 and 2 specifying transmission aggression. (Default: 0)

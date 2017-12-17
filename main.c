@@ -49,9 +49,10 @@ void print_help()
                     "      --retry            Unacceptable DNS response codes. (Default: REFUSED)\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Do not drop privileges when running as root. Not recommended.\n"
-                    "  -s  --hashmap-size     Number of concurrent lookups. (Default: 100000)\n"
+                    "  -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)\n"
                     "      --sndbuf           Size of the send buffer in bytes.\n"
                     "      --sticky           Do not switch the resolver when retrying.\n"
+                    "      --socket-count     Socket count per process. (Default: 1)\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
 #ifdef PCAP_SUPPORT
                     "      --use-pcap         Enable pcap usage.\n"
@@ -186,7 +187,7 @@ void set_rcvbuf(int fd)
     }
 }
 
-void set_default_socket(int version)
+void add_default_socket(int version)
 {
     socket_info_t info;
 
@@ -196,8 +197,8 @@ void set_default_socket(int version)
     if(info.descriptor >= 0)
     {
         buffer_t *buffer = version == 4 ? &context.sockets.interfaces4 : &context.sockets.interfaces6;
-        buffer->len = 1;
-        buffer->data = flatcopy(&info, sizeof(info));
+        buffer->data = safe_realloc(buffer->data, (buffer->len + 1) * sizeof(info));
+        ((socket_info_t*)buffer->data)[buffer->len++] = info;
         set_rcvbuf(info.descriptor);
         set_sndbuf(info.descriptor);
     }
@@ -246,8 +247,11 @@ void query_sockets_setup()
 {
     if(single_list_count(&context.cmd_args.bind_addrs4) == 0 && single_list_count(&context.cmd_args.bind_addrs6) == 0)
     {
-        set_default_socket(4);
-        set_default_socket(6);
+        for(size_t i = 0; i < context.cmd_args.socket_count; i++)
+        {
+            add_default_socket(4);
+            add_default_socket(6);
+        }
     }
     else
     {
@@ -403,10 +407,13 @@ void send_query(lookup_t *lookup)
         interfaces = &context.sockets.interfaces6;
     }
 
-    // Pick a random socket from that pool
-    // Pool of sockets cannot be empty due to check when parsing resolvers. Socket creation must have succeeded.
-    size_t socket_index = urandom_size_t() % interfaces->len;
-    int socket_descriptor = ((socket_info_t*)interfaces->data)[socket_index].descriptor;
+    if(lookup->socket == NULL)
+    {
+        // Pick a random socket from that pool
+        // Pool of sockets cannot be empty due to check when parsing resolvers. Socket creation must have succeeded.
+        size_t socket_index = urandom_size_t() % interfaces->len;
+        lookup->socket = (socket_info_t *) interfaces->data + socket_index;
+    }
 
     ssize_t result = dns_question_create(query_buffer, (char*)lookup->key->name.name, lookup->key->type,
                                                    lookup->transaction);
@@ -419,7 +426,7 @@ void send_query(lookup_t *lookup)
     // Set or unset the QD bit based on user preference
     dns_buf_set_rd(query_buffer, !context.cmd_args.norecurse);
 
-    ssize_t sent = sendto(socket_descriptor, query_buffer, (size_t) result, 0,
+    ssize_t sent = sendto(lookup->socket->descriptor, query_buffer, (size_t) result, 0,
                           (struct sockaddr *) &lookup->resolver->address,
                           sizeof(lookup->resolver->address));
     if(sent != result)
@@ -1390,12 +1397,13 @@ int parse_cmd(int argc, char **argv)
     context.cmd_args.outfile_name = "-";
 
     context.cmd_args.resolve_count = 50;
-    context.cmd_args.hashmap_size = 100000;
+    context.cmd_args.hashmap_size = 10000;
     context.cmd_args.interval_ms = 500;
     context.cmd_args.timed_ring_buckets = 10000;
     context.cmd_args.output = OUTPUT_TEXT_FULL;
     context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = true;
     context.cmd_args.num_processes = 1;
+    context.cmd_args.socket_count = 1;
 
     for (int i = 1; i < argc; i++)
     {
@@ -1546,11 +1554,11 @@ int parse_cmd(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--extreme") == 0 || strcmp(argv[i], "-x") == 0)
         {
-            context.cmd_args.extreme = (int)expect_arg_nonneg(i++, 0, 2);
+            context.cmd_args.extreme = (int) expect_arg_nonneg(i++, 0, 2);
         }
         else if (strcmp(argv[i], "--resolve-count") == 0 || strcmp(argv[i], "-c") == 0)
         {
-            context.cmd_args.resolve_count = (uint8_t)expect_arg_nonneg(i++, 1, UINT8_MAX);
+            context.cmd_args.resolve_count = (uint8_t) expect_arg_nonneg(i++, 1, UINT8_MAX);
         }
         else if (strcmp(argv[i], "--hashmap-size") == 0 || strcmp(argv[i], "-s") == 0)
         {
@@ -1570,17 +1578,21 @@ int parse_cmd(int argc, char **argv)
                 context.cmd_args.num_processes = (size_t)cores;
             }
         }
+        else if (strcmp(argv[i], "--socket-count") == 0)
+        {
+            context.cmd_args.socket_count = (size_t) expect_arg_nonneg(i++, 1, SIZE_MAX);
+        }
         else if (strcmp(argv[i], "--interval") == 0 || strcmp(argv[i], "-i") == 0)
         {
             context.cmd_args.interval_ms = (unsigned int) expect_arg_nonneg(i++, 1, UINT_MAX);
         }
         else if (strcmp(argv[i], "--sndbuf") == 0)
         {
-            context.cmd_args.sndbuf = (int)expect_arg_nonneg(i++, 0, INT_MAX);
+            context.cmd_args.sndbuf = (int) expect_arg_nonneg(i++, 0, INT_MAX);
         }
         else if (strcmp(argv[i], "--rcvbuf") == 0)
         {
-            context.cmd_args.rcvbuf = (int)expect_arg_nonneg(i++, 0, INT_MAX);
+            context.cmd_args.rcvbuf = (int) expect_arg_nonneg(i++, 0, INT_MAX);
         }
         else if (strcmp(argv[i], "--flush") == 0)
         {
