@@ -1001,6 +1001,9 @@ void binfile_write_head()
     uint8_t size_t_len = sizeof(size_t);
     fwrite(&size_t_len, sizeof(size_t_len), 1, context.outfile);
 
+    // Write size of time_t
+    size_t time_t_len = sizeof(time_t);
+    fwrite(&time_t_len, sizeof(time_t_len), 1, context.outfile);
 
     // Write byte length of sockaddr_storage size
     size_t sockaddr_storage_len = sizeof(struct sockaddr_storage);
@@ -1013,6 +1016,10 @@ void binfile_write_head()
     // Write size of sa_family_size within sockaddr_storage
     size_t sa_family_size = sizeof(sa_family_t);
     fwrite(&sa_family_size, sizeof(sa_family_size), 1, context.outfile);
+
+    // Write size of in_port_t
+    size_t sin_port_len = sizeof(in_port_t);
+    fwrite(&sin_port_len, sizeof(sin_port_len), 1, context.outfile);
 
 
     // Write IPv4 family constant
