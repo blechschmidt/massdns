@@ -13,3 +13,4 @@ cmake_install.cmake
 cmake-build-debug/
 *.igno
 *.ignore
+*.pyc
