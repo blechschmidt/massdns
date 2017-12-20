@@ -111,6 +111,7 @@ typedef struct
     buffer_t resolvers;
     lookup_entry_t *lookup_space;
     buffer_t lookup_pool;
+    Hashmap *resolver_map;
 
     struct
     {
@@ -129,6 +130,7 @@ typedef struct
     struct cmd_args
     {
         bool root;
+        bool verify_ip;
         char *resolvers;
         char *domains;
         char *outfile_name;

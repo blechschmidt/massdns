@@ -57,6 +57,7 @@ void print_help()
 #ifdef PCAP_SUPPORT
                     "      --use-pcap         Enable pcap usage.\n"
 #endif
+                    "      --verify-ip        Verify IP addresses of incoming replies.\n"
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "  -x  --extreme          Value between 0 and 2 specifying transmission aggression. (Default: 0)\n"
                     "\n"
@@ -80,6 +81,12 @@ void cleanup()
     {
         hashmapFree(context.map);
     }
+
+    if(context.resolver_map)
+    {
+        hashmapFree(context.resolver_map);
+    }
+
     timed_ring_destroy(&context.ring);
 
     free(context.resolvers.data);
@@ -122,6 +129,70 @@ void clean_exit(int status)
     exit(status);
 }
 
+// Adaption of djb2 for sockaddr_storage
+int hash_address(void *param)
+{
+    struct sockaddr_storage *address = param;
+
+    unsigned long hash = 5381;
+    uint8_t *addr_ptr;
+    uint8_t *addr_end;
+
+    if(address->ss_family == AF_INET)
+    {
+        struct sockaddr_in *addr4 = param;
+        addr_ptr = (uint8_t*)&addr4->sin_addr;
+        addr_end = addr_ptr + sizeof(addr4->sin_addr);
+        hash = ((hash << 5) + hash) + ((addr4->sin_port & 0xFF00) >> 8);
+        hash = ((hash << 5) + hash) + (addr4->sin_port & 0x00FF);
+    }
+    else if(address->ss_family == AF_INET6)
+    {
+        struct sockaddr_in6 *addr6 = param;
+        addr_ptr = (uint8_t*)&addr6->sin6_addr;
+        addr_end = addr_ptr + sizeof(addr6->sin6_addr);
+        hash = ((hash << 5) + hash) + ((addr6->sin6_port & 0xFF00) >> 8);
+        hash = ((hash << 5) + hash) + (addr6->sin6_port & 0x00FF);
+    }
+    else
+    {
+        fprintf(stderr, "Unsupported address for hashing.\n");
+        abort();
+    }
+
+    while (addr_ptr < addr_end)
+    {
+        hash = ((hash << 5) + hash) + *addr_ptr; /* hash * 33 + c */
+        addr_ptr++;
+    }
+    return (int)hash;
+}
+
+// Expects valid (non-NULL) pointers to sockaddr storages of family AF_INET / AF_INET6
+bool addresses_equal(void *param1, void *param2)
+{
+    struct sockaddr_storage *addr1 = param1;
+    struct sockaddr_storage *addr2 = param2;
+
+    if(addr1->ss_family != addr2->ss_family)
+    {
+        return false;
+    }
+
+    if(addr1->ss_family == AF_INET)
+    {
+        return memcmp(&((struct sockaddr_in*)addr1)->sin_addr,
+                &((struct sockaddr_in*)addr2)->sin_addr, sizeof(((struct sockaddr_in*)addr1)->sin_addr)) == 0
+                && ((struct sockaddr_in*)addr1)->sin_port == ((struct sockaddr_in*)addr2)->sin_port;
+    }
+    else // Must be AF_INET6
+    {
+        return memcmp(&((struct sockaddr_in6*)addr1)->sin6_addr,
+                      &((struct sockaddr_in6*)addr2)->sin6_addr, sizeof(((struct sockaddr_in6*)addr1)->sin6_addr)) == 0
+               && ((struct sockaddr_in6*)addr1)->sin6_port == ((struct sockaddr_in6*)addr2)->sin6_port;
+    }
+    return false;
+}
 
 buffer_t massdns_resolvers_from_file(char *filename)
 {
@@ -165,6 +236,30 @@ buffer_t massdns_resolvers_from_file(char *filename)
         fprintf(stderr, "No usable resolvers were found. Terminating.\n");
         clean_exit(1);
     }
+
+    if(context.cmd_args.verify_ip)
+    {
+        context.resolver_map = hashmapCreate(resolvers.len, hash_address, addresses_equal);
+        if(!context.resolver_map)
+        {
+            perror("Failed to create resolver lookup map");
+            abort();
+        }
+
+        for (size_t i = 0; i < resolvers.len; i++)
+        {
+            resolver_t *resolver = ((resolver_t*)resolvers.data) + i;
+
+            errno = 0;
+            hashmapPut(context.resolver_map, &resolver->address, resolver);
+            if (errno != 0)
+            {
+                perror("Error putting resolver into hashmap");
+                abort();
+            }
+        }
+    }
+
     single_list_free_with_elements(list);
     return resolvers;
 }
@@ -364,7 +459,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     *new = (hashmapPut(context.map, key, value) == NULL);
     if(errno != 0)
     {
-        perror("Error");
+        perror("Error putting lookup into hashmap");
         abort();
     }
 
@@ -787,9 +882,20 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     static dns_pkt_t packet;
     static uint8_t *parse_offset;
     static lookup_t *lookup;
+    static resolver_t* resolver;
 
     context.stats.current_rate++;
     context.stats.numreplies++;
+
+    if(context.cmd_args.verify_ip)
+    {
+        resolver = hashmapGet(context.resolver_map, recvaddr);
+        if(resolver == NULL)
+        {
+            //fprintf(stderr, "Fake/NAT reply from %s\n", sockaddr2str(recvaddr));
+            return;
+        }
+    }
 
     if(!dns_parse_question(offset, len, &packet.head, &parse_offset))
     {
@@ -1663,6 +1769,10 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--flush") == 0)
         {
             context.cmd_args.flush = true;
+        }
+        else if (strcmp(argv[i], "--verify-ip") == 0)
+        {
+            context.cmd_args.verify_ip = true;
         }
         else
         {

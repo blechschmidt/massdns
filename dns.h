@@ -1452,6 +1452,17 @@ char *dns_section2str(dns_section_t section)
     return "UNKNOWN";
 }
 
+bool dns_in_zone(dns_name_t *name, dns_name_t *zone)
+{
+    return zone->length == 1 // Provided that the label is a FQDN, this is the root zone containing everything else
+           || (zone->length == name->length
+               && strcasecmp((char*)name->name + name->length - zone->length, (char*)zone->name) == 0)
+           || (zone->length < name->length
+               && strcasecmp((char*)name->name + name->length - zone->length, (char*)zone->name) == 0
+               && *(name->name + name->length - zone->length - 1) == '.');
+
+}
+
 void dns_print_packet(FILE *f, dns_pkt_t *packet, uint8_t *begin, size_t len, uint8_t *next)
 {
     static char buf[0xFFFF];
