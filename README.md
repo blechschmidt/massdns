@@ -13,7 +13,7 @@ concurrency which may have broken compatibility with some platforms. In case of 
 [switch to the more mature version 0.2](https://github.com/blechschmidt/massdns/tree/v0.2).
 
 Also note that the command line interface has changed slightly due to criticism of the output complexity. Additionally,
-the default value of the `-s` and `-i` parameters have been changed. The repository structure has been changed as well.
+the default values of the `-s` and `-i` parameters have been changed. The repository structure has been changed as well.
 
 ## Contributors
 * [Quirin Scheitle](https://github.com/quirins), [Technical University of Munich](https://www.net.in.tum.de/members/scheitle/)
