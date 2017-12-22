@@ -125,6 +125,11 @@ typedef struct
 
         bool match_name;
         bool ttl;
+        bool separate_queries;
+        bool separate_sections;
+        bool include_meta;
+        bool indent_sections;
+        bool print_question;
     } format;
 
     struct cmd_args
@@ -138,7 +143,6 @@ typedef struct
         size_t hashmap_size;
         unsigned int interval_ms;
         bool norecurse;
-        bool finalstats;
         bool quiet;
         int sndbuf;
         int rcvbuf;

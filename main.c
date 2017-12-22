@@ -18,6 +18,7 @@
 #include <stddef.h>
 #include <sys/sysinfo.h>
 #include <limits.h>
+#include <stdarg.h>
 
 #ifdef PCAP_SUPPORT
 #include <net/ethernet.h>
@@ -34,13 +35,12 @@ void print_help()
                     "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
-                    "      --finalstats       Write final stats to STDERR when done.\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same\n"
                     "                         domain. (Default: 500)\n"
                     "  -l  --error-log        Error log file path. (Default: /dev/stderr)\n"
-                    "  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
+                    "      --norecurse        Use non-recursive queries. Useful for DNS cache snooping.\n"
                     "  -o  --output           Flags for output formatting.\n"
                     "      --predictable      Use resolvers incrementally. Useful for resolver tests.\n"
                     "      --processes        Number of processes to be used for resolving. (Default: 1)\n"
@@ -59,7 +59,6 @@ void print_help()
 #endif
                     "      --verify-ip        Verify IP addresses of incoming replies.\n"
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
-                    "  -x  --extreme          Value between 0 and 2 specifying transmission aggression. (Default: 0)\n"
                     "\n"
                     "Output flags:\n"
                     "  S - simple text output\n"
@@ -104,6 +103,10 @@ void cleanup()
     {
         fclose(context.outfile);
     }
+    if(context.logfile)
+    {
+        fclose(context.outfile);
+    }
 
     free(context.stat_messages);
 
@@ -121,6 +124,21 @@ void cleanup()
             close(context.sockets.pipes[i]);
         }
     }
+}
+
+void log_msg(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    if(context.logfile != stderr)
+    {
+        vfprintf(stderr, format, args);
+    }
+    if(context.logfile)
+    {
+        vfprintf(context.logfile, format, args);
+    }
+    va_end(args);
 }
 
 void clean_exit(int status)
@@ -156,7 +174,7 @@ int hash_address(void *param)
     }
     else
     {
-        fprintf(stderr, "Unsupported address for hashing.\n");
+        log_msg("Unsupported address for hashing.\n");
         abort();
     }
 
@@ -200,7 +218,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
     FILE *f = fopen(filename, "r");
     if (f == NULL)
     {
-        perror("Failed to open resolver file");
+        log_msg("Failed to open resolver file: %s\n", strerror(errno));
         clean_exit(EXIT_FAILURE);
     }
     single_list_t *list = single_list_new();
@@ -220,12 +238,12 @@ buffer_t massdns_resolvers_from_file(char *filename)
                 }
                 else
                 {
-                    fprintf(stderr, "No query socket for resolver \"%s\" found.\n", line);
+                    log_msg("No query socket for resolver \"%s\" found.\n", line);
                 }
             }
             else
             {
-                fprintf(stderr, "\"%s\" is not a valid resolver. Skipped.\n", line);
+                log_msg("\"%s\" is not a valid resolver. Skipped.\n", line);
             }
         }
     }
@@ -233,8 +251,8 @@ buffer_t massdns_resolvers_from_file(char *filename)
     buffer_t resolvers = single_list_to_array_copy(list, sizeof(resolver_t));
     if(single_list_count(list) == 0)
     {
-        fprintf(stderr, "No usable resolvers were found. Terminating.\n");
-        clean_exit(1);
+        log_msg("No usable resolvers were found. Terminating.\n");
+        clean_exit(EXIT_FAILURE);
     }
 
     if(context.cmd_args.verify_ip)
@@ -242,7 +260,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
         context.resolver_map = hashmapCreate(resolvers.len, hash_address, addresses_equal);
         if(!context.resolver_map)
         {
-            perror("Failed to create resolver lookup map");
+            log_msg("Failed to create resolver lookup map: %s\n", strerror(errno));
             abort();
         }
 
@@ -254,7 +272,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
             hashmapPut(context.resolver_map, &resolver->address, resolver);
             if (errno != 0)
             {
-                perror("Error putting resolver into hashmap");
+                log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
                 abort();
             }
         }
@@ -269,7 +287,7 @@ void set_sndbuf(int fd)
     if(context.cmd_args.sndbuf
         && setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &context.cmd_args.sndbuf, sizeof(context.cmd_args.sndbuf)) == 0)
     {
-        fprintf(stderr, "Failed to adjust send buffer size: %s\n", strerror(errno));
+        log_msg("Failed to adjust send buffer size: %s\n", strerror(errno));
     }
 }
 
@@ -278,7 +296,7 @@ void set_rcvbuf(int fd)
     if(context.cmd_args.rcvbuf
         && setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &context.cmd_args.rcvbuf, sizeof(context.cmd_args.rcvbuf)) == 0)
     {
-        fprintf(stderr, "Failed to adjust receive buffer size: %s\n", strerror(errno));
+        log_msg("Failed to adjust receive buffer size: %s\n", strerror(errno));
     }
 }
 
@@ -299,7 +317,7 @@ void add_default_socket(int version)
     }
     else
     {
-        fprintf(stderr, "Failed to create IPv%d socket: %s\n", version, strerror(errno));
+        log_msg("Failed to create IPv%d socket: %s\n", version, strerror(errno));
     }
 }
 
@@ -318,7 +336,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         {
             if(bind(info.descriptor, (struct sockaddr*)addr, sizeof(*addr)) != 0)
             {
-                fprintf(stderr, "Not adding socket due to bind failure: %s\n", strerror(errno));
+                log_msg("Not adding socket %s due to bind failure: %s\n", sockaddr2str(addr), strerror(errno));
             }
             else
             {
@@ -329,7 +347,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         }
         else
         {
-            fprintf(stderr, "Failed to create IPv%d socket: %s\n", info.protocol, strerror(errno));
+            log_msg("Failed to create IPv%d socket: %s\n", info.protocol, strerror(errno));
         }
         free(element->data);
     }
@@ -432,7 +450,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     //lookup_key_t *key = safe_malloc(sizeof(*key));
     if(context.lookup_pool.len == 0)
     {
-        fprintf(stderr, "Empty lookup pool.\n");
+        log_msg("Empty lookup pool.\n");
         clean_exit(EXIT_FAILURE);
     }
     lookup_entry_t *entry = ((lookup_entry_t**)context.lookup_pool.data)[--context.lookup_pool.len];
@@ -459,7 +477,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     *new = (hashmapPut(context.map, key, value) == NULL);
     if(errno != 0)
     {
-        perror("Error putting lookup into hashmap");
+        log_msg("Error putting lookup into hashmap: %s\n", strerror(errno));
         abort();
     }
 
@@ -514,7 +532,7 @@ void send_query(lookup_t *lookup)
                                                    lookup->transaction);
     if (result < DNS_PACKET_MINIMUM_SIZE)
     {
-        fprintf(stderr, "Failed to create DNS question for query \"%s\".", lookup->key->name.name);
+        log_msg("Failed to create DNS question for query \"%s\".", lookup->key->name.name);
         return;
     }
 
@@ -526,7 +544,7 @@ void send_query(lookup_t *lookup)
                           sizeof(lookup->resolver->address));
     if(sent != result)
     {
-        fprintf(stderr, "Error sending: %s\n", strerror(errno));
+        log_msg("Error sending: %s\n", strerror(errno));
     }
 }
 
@@ -571,7 +589,7 @@ void send_stats()
 
     if(write(context.sockets.write_pipe.descriptor, &stats_msg, sizeof(stats_msg)) != sizeof(stats_msg))
     {
-        fprintf(stderr, "Could not send stats atomically.\n");
+        log_msg("Could not send stats atomically.\n");
     }
 }
 
@@ -600,8 +618,6 @@ void check_progress()
     time_t elapsed_ns = (now.tv_sec - last_time.tv_sec) * 1000000000 + (now.tv_nsec - last_time.tv_nsec);
     size_t rate_pps = elapsed_ns == 0 ? 0 : context.stats.current_rate * TIMED_RING_S / elapsed_ns;
     last_time = now;
-
-    // TODO: Hashmap size adaption logic will be handled here.
 
     // Send the stats of the child to the parent process
     if(context.cmd_args.num_processes > 1 && context.fork_index != 0)
@@ -848,35 +864,6 @@ void ring_timeout(void *param)
     }
 }
 
-char *sockaddr2str(struct sockaddr_storage *addr)
-{
-    static char str[INET6_ADDRSTRLEN + sizeof(":65535") - 1 + 2]; // + 2 for [ and ]
-    static uint16_t port;
-    size_t len;
-
-    if(addr->ss_family == AF_INET)
-    {
-        port = ntohs(((struct sockaddr_in*)addr)->sin_port);
-        inet_ntop(addr->ss_family, &((struct sockaddr_in*)addr)->sin_addr, str, sizeof(str));
-        len = strlen(str);
-        // inet_ntop does not allow us to determine, how long the printed string was.
-        // Thus, we have to use strlen.
-    }
-    else
-    {
-        str[0] = '[';
-        port = ntohs(((struct sockaddr_in6*)addr)->sin6_port);
-        inet_ntop(addr->ss_family, &((struct sockaddr_in6*)addr)->sin6_addr, str + 1, sizeof(str) - 1);
-        len = strlen(str);
-        str[len++] = ']';
-        str[len] = 0;
-    }
-
-    snprintf(str + len, sizeof(str) - len, ":%" PRIu16, port);
-
-    return str;
-}
-
 void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
 {
     static dns_pkt_t packet;
@@ -892,7 +879,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         resolver = hashmapGet(context.resolver_map, recvaddr);
         if(resolver == NULL)
         {
-            //fprintf(stderr, "Fake/NAT reply from %s\n", sockaddr2str(recvaddr));
+            //log_msg("Fake/NAT reply from %s\n", sockaddr2str(recvaddr));
             return;
         }
     }
@@ -965,16 +952,49 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 break;
 
             case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
+                if(context.format.print_question)
+                {
+                    if(!context.format.include_meta)
+                    {
+                        fprintf(context.outfile,
+                                "%s %s %s\n",
+                                dns_name2str(&packet.head.question.name),
+                                context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
+                                dns_record_type2str((dns_record_type) packet.head.question.type));
+                    }
+                    else
+                    {
+                        fprintf(context.outfile,
+                                "%s %lu %s %s %s %s\n",
+                                sockaddr2str(recvaddr),
+                                now,
+                                dns_rcode2str((dns_rcode)packet.head.header.rcode),
+                                dns_name2str(&packet.head.question.name),
+                                context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
+                                dns_record_type2str((dns_record_type) packet.head.question.type));
+                    }
+                }
                 for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
                 {
+                    char *section_separator = "";
                     if(rec_index >= packet.head.header.ans_count)
                     {
                         if(rec_index >= non_add_count)
                         {
+                            // We are entering a new section
+                            if(context.format.separate_sections && section != DNS_SECTION_ADDITIONAL)
+                            {
+                                section_separator = "\n";
+                            }
                             section = DNS_SECTION_ADDITIONAL;
                         }
                         else
                         {
+                            // We are entering a new section
+                            if(context.format.separate_sections && section != DNS_SECTION_AUTHORITY)
+                            {
+                                section_separator = "\n";
+                            }
                             section = DNS_SECTION_AUTHORITY;
                         }
                     }
@@ -987,7 +1007,9 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     if(!context.format.ttl)
                     {
                         fprintf(context.outfile,
-                                "%s %s %s\n",
+                                "%s%s%s %s %s\n",
+                                section_separator,
+                                context.format.indent_sections ? "\t" : "",
                                 dns_name2str(&rec.name),
                                 dns_record_type2str((dns_record_type) rec.type),
                                 dns_raw_record_data2str(&rec, offset, offset + short_len));
@@ -995,13 +1017,19 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     else
                     {
                         fprintf(context.outfile,
-                                "%s %s %" PRIu16 " %s %s\n",
+                                "%s%s%s %s %" PRIu16 " %s %s\n",
+                                section_separator,
+                                context.format.indent_sections ? "\t" : "",
                                 dns_name2str(&rec.name),
                                 dns_class2str((dns_class)rec.class),
                                 rec.ttl,
                                 dns_record_type2str((dns_record_type) rec.type),
                                 dns_raw_record_data2str(&rec, offset, offset + short_len));
                     }
+                }
+                if(context.format.separate_queries)
+                {
+                    fprintf(context.outfile, "\n");
                 }
                 break;
         }
@@ -1168,23 +1196,23 @@ void privilege_drop()
         {
             if (!context.cmd_args.quiet)
             {
-                fprintf(stderr, "Privileges have been dropped to \"%s\" for security reasons.\n\n", username);
+                log_msg("Privileges have been dropped to \"%s\" for security reasons.\n", username);
             }
         }
         else
         {
-            fprintf(stderr, "Privileges could not be dropped to \"%s\".\n"
+            log_msg("Privileges could not be dropped to \"%s\".\n"
                 "For security reasons, this program will only run as root user when supplied with --root"
                 "which is not recommended.\n"
                 "It is better practice to run this program as a different user.\n", username);
-            clean_exit(1);
+            clean_exit(EXIT_FAILURE);
         }
     }
     else
     {
         if (!context.cmd_args.quiet)
         {
-            fprintf(stderr, "[WARNING] Privileges were not dropped. This is not recommended.\n\n");
+            log_msg("[WARNING] Privileges were not dropped. This is not recommended.\n");
         }
     }
 }
@@ -1197,7 +1225,7 @@ void pcap_setup()
     {
         goto pcap_error;
     }
-    fprintf(stderr, "Default pcap device: %s", context.pcap_dev);
+    log_msg("Default pcap device: %s", context.pcap_dev);
 
 
     char mac_filter[sizeof("ether dst ") - 1 + MAC_READABLE_BUFLEN];
@@ -1206,10 +1234,10 @@ void pcap_setup()
 
     if(get_iface_hw_addr_readable(context.pcap_dev, mac_readable) != 0)
     {
-        fprintf(stderr, "\nFailed to determine the hardware address of the device.\n");
+        log_msg("\nFailed to determine the hardware address of the device.\n");
         goto pcap_error_noprint;
     }
-    fprintf(stderr, ", address: %s\n", mac_readable);
+    log_msg(", address: %s\n", mac_readable);
 
 
     context.pcap = pcap_create(context.pcap_dev, context.pcap_error);
@@ -1236,19 +1264,19 @@ void pcap_setup()
     int activation_status = pcap_activate(context.pcap);
     if(activation_status != 0)
     {
-        fprintf(stderr, "Error during pcap activation: %s\n", pcap_statustostr(activation_status));
+        log_msg("Error during pcap activation: %s\n", pcap_statustostr(activation_status));
         goto pcap_error_noprint;
     }
 
     if(pcap_compile(context.pcap, &context.pcap_filter, mac_filter, 0, PCAP_NETMASK_UNKNOWN) != 0)
     {
-        fprintf(stderr, "Error during pcap filter compilation: %s\n", pcap_geterr(context.pcap));
+        log_msg("Error during pcap filter compilation: %s\n", pcap_geterr(context.pcap));
         goto pcap_error_noprint;
     }
 
     if(pcap_setfilter(context.pcap, &context.pcap_filter) != 0)
     {
-        fprintf(stderr, "Error setting pcap filter: %s\n", pcap_geterr(context.pcap));
+        log_msg("Error setting pcap filter: %s\n", pcap_geterr(context.pcap));
         goto pcap_error_noprint;
     }
 
@@ -1264,16 +1292,16 @@ void pcap_setup()
     ev.events = EPOLLIN;
     if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.pcap_info.descriptor, &ev) != 0)
     {
-        perror("Failed to add epoll event");
+        log_msg("Failed to add epoll event: %s\n", strerror(errno));
         clean_exit(EXIT_FAILURE);
     }
     return;
 
 pcap_error:
-    fprintf(stderr, "Error during pcap setup: %s\n", context.pcap_error);
+    log_msg("Error during pcap setup: %s\n", context.pcap_error);
 pcap_error_noprint:
     cleanup();
-    clean_exit(1);
+    clean_exit(EXIT_FAILURE);
 }
 #endif
 
@@ -1291,7 +1319,7 @@ void init_pipes()
     {
         if(pipe(context.sockets.pipes + i * 2) != 0)
         {
-            perror("Pipe failed");
+            log_msg("Pipe failed: %s\n", strerror(errno));
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1321,7 +1349,7 @@ void setup_pipes()
             ev.events = EPOLLIN;
             if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.sockets.master_pipes_read[i].descriptor, &ev) != 0)
             {
-                perror("Failed to add epoll event");
+                log_msg("Failed to add epoll event: %s\n", strerror(errno));
                 clean_exit(EXIT_FAILURE);
             }
         }
@@ -1353,7 +1381,7 @@ void read_control_message(socket_info_t *socket_info)
     ssize_t read_result = read(socket_info->descriptor, context.stat_messages + process, sizeof(stats_exchange_t));
     if(read_result < sizeof(stats_exchange_t))
     {
-        fprintf(stderr, "Atomic read failed %ld.\n", read_result);
+        log_msg("Atomic read failed %ld.\n", read_result);
     }
 
 }
@@ -1364,14 +1392,14 @@ void run()
 
     if(!urandom_init())
     {
-        fprintf(stderr, "Failed to open /dev/urandom: %s\n", strerror(errno));
-        clean_exit(1);
+        log_msg("Failed to open /dev/urandom: %s\n", strerror(errno));
+        clean_exit(EXIT_FAILURE);
     }
 
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
     if(context.map == NULL)
     {
-        fprintf(stderr, "Failed to create hashmap.\n");
+        log_msg("Failed to create hashmap.\n");
         clean_exit(EXIT_FAILURE);
     }
 
@@ -1426,7 +1454,7 @@ void run()
         }
         if(!context.outfile)
         {
-            perror("Failed to open output file");
+            log_msg("Failed to open output file: %s\n", strerror(errno));
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1434,7 +1462,7 @@ void run()
     {
         if(context.cmd_args.num_processes > 1)
         {
-            fprintf(stderr, "Multiprocessing is currently only supported through the -w parameter.\n");
+            log_msg("Multiprocessing is currently only supported through the -w parameter.\n");
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1465,7 +1493,7 @@ void run()
         int ready = epoll_wait(context.epollfd, pevents, sizeof(pevents) / sizeof(pevents[0]), 1);
         if (ready < 0)
         {
-            perror("Epoll failure");
+            log_msg("Epoll failure: %s\n", strerror(errno));
         }
         else if(ready == 0) // Epoll timeout
         {
@@ -1505,7 +1533,7 @@ void use_stdin()
 {
     if (!context.cmd_args.quiet)
     {
-        fprintf(stderr, "Reading domain list from stdin.\n");
+        log_msg("Reading domain list from stdin.\n");
     }
     context.domainfile = stdin;
 }
@@ -1519,7 +1547,7 @@ int parse_cmd(int argc, char **argv)
     if (argc <= 1)
     {
         print_help();
-        return 1;
+        clean_exit(EXIT_FAILURE);
     }
 
 #ifdef PCAP_SUPPORT
@@ -1552,7 +1580,7 @@ int parse_cmd(int argc, char **argv)
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
         {
             print_help();
-            return 1;
+            clean_exit(EXIT_SUCCESS);
         }
         else if (strcmp(argv[i], "--resolvers") == 0 || strcmp(argv[i], "-r") == 0)
         {
@@ -1563,9 +1591,8 @@ int parse_cmd(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, "Resolvers may only be supplied once.\n\n");
-                print_help();
-                return 1;
+                log_msg("Resolvers may only be supplied once.\n");
+                clean_exit(EXIT_FAILURE);
             }
         }
         else if(strcmp(argv[i], "--retry") == 0)
@@ -1588,7 +1615,7 @@ int parse_cmd(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, "Invalid retry code: %s.\n", argv[i]);
+                log_msg("Invalid retry code: %s.\n", argv[i]);
             }
         }
         else if (strcmp(argv[i], "--bindto") == 0 || strcmp(argv[i], "-b") == 0)
@@ -1598,9 +1625,8 @@ int parse_cmd(int argc, char **argv)
             if (!str_to_addr(argv[++i], 0, addr))
             {
                 free(addr);
-                fprintf(stderr, "Invalid address for socket binding.\n\n");
-                print_help();
-                return 1;
+                log_msg("Invalid address for socket binding: %s\n", argv[i]);
+                clean_exit(EXIT_FAILURE);
 
             }
             single_list_push_back(addr->ss_family == AF_INET ? &context.cmd_args.bind_addrs4 :
@@ -1621,8 +1647,8 @@ int parse_cmd(int argc, char **argv)
                 context.logfile = fopen(filename, "w");
                 if(!context.logfile)
                 {
-                    perror("Failed to open log file");
-                    return 1;
+                    log_msg("Failed to open log file: %s\n", strerror(errno));
+                    clean_exit(EXIT_FAILURE);
                 }
             }
         }
@@ -1631,15 +1657,14 @@ int parse_cmd(int argc, char **argv)
             expect_arg(i);
             if (context.cmd_args.record_type != DNS_REC_INVALID)
             {
-                fprintf(stderr, "Currently, only one record type is supported.\n\n");
-                return 1;
+                log_msg("Currently, only one record type is supported.\n");
+                clean_exit(EXIT_FAILURE);
             }
             dns_record_type rtype = dns_str_to_record_type(argv[++i]);
             if (rtype == DNS_REC_INVALID)
             {
-                fprintf(stderr, "Unsupported record type: %s\n\n", argv[i]);
-                print_help();
-                return 1;
+                log_msg("Unsupported record type: %s\n", argv[i]);
+                clean_exit(EXIT_FAILURE);
             }
             context.cmd_args.record_type = rtype;
         }
@@ -1659,47 +1684,68 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--output") == 0 || strcmp(argv[i], "-o") == 0)
         {
             expect_arg(i++);
-            if(strchr(argv[i], 'B'))
+            switch(argv[i][0])
             {
-                context.cmd_args.output = OUTPUT_BINARY;
-            }
-            else if(strchr(argv[i], 'S'))
-            {
-                context.cmd_args.output = OUTPUT_TEXT_SIMPLE;
+                case 'B':
+                    context.cmd_args.output = OUTPUT_BINARY;
+                    break;
 
-                if(strcmp(argv[i], "S") != 0)
-                {
-                    context.format.sections[DNS_SECTION_ANSWER] = false;
-                    context.format.match_name = false;
-                }
-                for(char *output_option = argv[i] + 1; *output_option != 0; output_option++)
-                {
-                    switch(*output_option)
+                case 'S':
+                    context.cmd_args.output = OUTPUT_TEXT_SIMPLE;
+
+                    if(strcmp(argv[i], "S") != 0)
                     {
-                        case 'u':
-                            context.format.sections[DNS_SECTION_AUTHORITY] = true;
-                            break;
-                        case 'd':
-                            context.format.sections[DNS_SECTION_ADDITIONAL] = true;
-                            break;
-                        case 'n':
-                            context.format.sections[DNS_SECTION_ANSWER] = true;
-                            break;
-                        case 'm':
-                            context.format.match_name = true;
-                            break;
-                        case 't':
-                            context.format.ttl = true;
-                            break;
-                        default:
-                            fprintf(stderr, "Unrecognized output option: %c\n", *output_option);
-                            clean_exit(EXIT_FAILURE);
+                        context.format.sections[DNS_SECTION_ANSWER] = false;
+                        context.format.match_name = false;
                     }
-                }
-            }
-            else if(strchr(argv[i], 'F'))
-            {
-                context.cmd_args.output = OUTPUT_TEXT_FULL;
+                    for(char *output_option = argv[i] + 1; *output_option != 0; output_option++)
+                    {
+                        switch(*output_option)
+                        {
+                            case 'u':
+                                context.format.sections[DNS_SECTION_AUTHORITY] = true;
+                                break;
+                            case 'd':
+                                context.format.sections[DNS_SECTION_ADDITIONAL] = true;
+                                break;
+                            case 'n':
+                                context.format.sections[DNS_SECTION_ANSWER] = true;
+                                break;
+                            case 'm':
+                                context.format.match_name = true;
+                                break;
+                            case 't':
+                                context.format.ttl = true;
+                                break;
+                            case 'l':
+                                context.format.separate_queries = true;
+                                break;
+                            case 'i':
+                                context.format.indent_sections = true;
+                                break;
+                            case 's':
+                                context.format.separate_sections = true;
+                                break;
+                            case 'q':
+                                context.format.print_question = true;
+                                break;
+                            case 'r':
+                                context.format.include_meta = true;
+                                break;
+                            default:
+                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                clean_exit(EXIT_FAILURE);
+                        }
+                    }
+                    break;
+
+                case 'F':
+                    context.cmd_args.output = OUTPUT_TEXT_FULL;
+                    break;
+
+                default:
+                    log_msg("Unrecognized output format.\n");
+                    clean_exit(EXIT_FAILURE);
             }
         }
 #ifdef PCAP_SUPPORT
@@ -1716,15 +1762,11 @@ int parse_cmd(int argc, char **argv)
         {
             context.cmd_args.sticky = true;
         }
-        else if (strcmp(argv[i], "--finalstats") == 0)
-        {
-            context.cmd_args.finalstats = true;
-        }
         else if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0)
         {
             context.cmd_args.quiet = true;
         }
-        else if (strcmp(argv[i], "--extreme") == 0 || strcmp(argv[i], "-x") == 0)
+        else if (strcmp(argv[i], "--extreme") == 0)
         {
             context.cmd_args.extreme = (int) expect_arg_nonneg(i++, 0, 2);
         }
@@ -1744,8 +1786,8 @@ int parse_cmd(int argc, char **argv)
                 int cores = get_nprocs_conf();
                 if(cores <= 0)
                 {
-                    fprintf(stderr, "Failed to determine number of processor cores.\n");
-                    clean_exit(1);
+                    log_msg("Failed to determine number of processor cores.\n");
+                    clean_exit(EXIT_FAILURE);
                 }
                 context.cmd_args.num_processes = (size_t)cores;
             }
@@ -1790,8 +1832,8 @@ int parse_cmd(int argc, char **argv)
                     context.domainfile = fopen(argv[i], "r");
                     if (context.domainfile == NULL)
                     {
-                        fprintf(stderr, "Failed to open domain file \"%s\".\n", argv[i]);
-                        clean_exit(1);
+                        log_msg("Failed to open domain file \"%s\".\n", argv[i]);
+                        clean_exit(EXIT_FAILURE);
                     }
                     if(fseek(context.domainfile, 0, SEEK_END) != 0)
                     {
@@ -1811,9 +1853,8 @@ int parse_cmd(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, "The domain list may only be supplied once.\n\n");
-                print_help();
-                return 1;
+                log_msg("The domain list may only be supplied once.\n");
+                clean_exit(EXIT_FAILURE);
             }
         }
     }
@@ -1826,13 +1867,12 @@ int parse_cmd(int argc, char **argv)
         // Some operators will not reply to ANY requests:
         // https://blog.cloudflare.com/deprecating-dns-any-meta-query-type/
         // https://lists.dns-oarc.net/pipermail/dns-operations/2013-January/009501.html
-        fprintf(stderr, "Note that DNS ANY scans might be unreliable.\n");
+        log_msg("Note that DNS ANY scans might be unreliable.\n");
     }
     if (context.cmd_args.resolvers == NULL)
     {
-        fprintf(stderr, "Resolvers are required to be supplied.\n\n");
-        print_help();
-        return 1;
+        log_msg("Resolvers are required to be supplied.\n");
+        clean_exit(EXIT_FAILURE);
     }
     if (context.domainfile == NULL)
     {
@@ -1842,9 +1882,8 @@ int parse_cmd(int argc, char **argv)
         }
         else
         {
-            fprintf(stderr, "The domain list is required to be supplied.\n\n");
-            print_help();
-            return 1;
+            log_msg("The domain list is required to be supplied.\n");
+            clean_exit(EXIT_FAILURE);
         }
     }
     return 0;

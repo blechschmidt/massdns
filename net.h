@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <inttypes.h>
 
 #define loop_sockets(sockets) \
         for (socket_info_t *socket = (sockets)->data; socket < ((socket_info_t*)(sockets)->data) + (sockets)->len; socket++)
@@ -169,6 +170,35 @@ int get_iface_hw_addr_readable(char *iface, char *hw_mac)
         }
     }
     return result;
+}
+
+char *sockaddr2str(struct sockaddr_storage *addr)
+{
+    static char str[INET6_ADDRSTRLEN + sizeof(":65535") + 2]; // + 2 for [ and ]
+    static uint16_t port;
+    size_t len;
+
+    if(addr->ss_family == AF_INET)
+    {
+        port = ntohs(((struct sockaddr_in*)addr)->sin_port);
+        inet_ntop(addr->ss_family, &((struct sockaddr_in*)addr)->sin_addr, str, sizeof(str));
+        len = strlen(str);
+        // inet_ntop does not allow us to determine, how long the printed string was.
+        // Thus, we have to use strlen.
+    }
+    else
+    {
+        str[0] = '[';
+        port = ntohs(((struct sockaddr_in6*)addr)->sin6_port);
+        inet_ntop(addr->ss_family, &((struct sockaddr_in6*)addr)->sin6_addr, str + 1, sizeof(str) - 1);
+        len = strlen(str);
+        str[len++] = ']';
+        str[len] = 0;
+    }
+
+    snprintf(str + len, sizeof(str) - len, ":%" PRIu16, port);
+
+    return str;
 }
 
 #endif //MASSRESOLVER_NET_H
