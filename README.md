@@ -3,7 +3,7 @@
 
 MassDNS is a simple high-performance DNS stub resolver targetting those who seek to resolve a massive amount of domain
 names in the order of millions or even billions. Without special configuration, MassDNS is capable of resolving over
-500,000 names per second using publicly available resolvers.
+350,000 names per second using publicly available resolvers.
 
 ## Major changes
 This version of MassDNS is currently experimental. In order to speed up the resolving process, the `ldns` dependency has
