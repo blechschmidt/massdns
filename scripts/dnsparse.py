@@ -19,6 +19,13 @@ class UnexpectedFileEnd(Exception):
 class InvalidValue(Exception):
     pass
 
+class DnsResult:
+    def __init__(self, timestamp, resolver, raw):
+        self.timestamp = timestamp
+        self.resolver = resolver
+        self.raw = raw
+        self.message = dns.message.from_wire(raw)
+
 class BinaryDnsResultParser:
     def __init__(self, filename, throw_incomplete=False):
         f = open(filename, "rb")
@@ -72,7 +79,7 @@ class BinaryDnsResultParser:
         self._sin_port_offset = sin_port_offset
         self._sin6_port_offset = sin6_port_offset
 
-    def messages(self):
+    def results(self):
         msg_header_len = self._time_size + self._sockaddr_storage_size + 2
         while True:
             msg_header = self._file.read(msg_header_len)
@@ -109,7 +116,7 @@ class BinaryDnsResultParser:
             if len(dns_data) < dns_data_len and self._throw_incomplete:
                 raise UnexpectedFileEnd()
 
-            yield (timestamp, (ip, port), dns.message.from_wire(dns_data),)
+            yield DnsResult(timestamp, (ip, port), dns_data)
 
     @staticmethod
     def __size_len_to_modifier__(size):
@@ -143,8 +150,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     with BinaryDnsResultParser(sys.argv[1], True) as parser:
-        for (timestamp, (ip, port), msg,) in parser.messages():
-            formatted_time = time.strftime("%d %b %Y %H:%M:%S %Z", time.localtime(timestamp))
-            print(str(ip) + ":" + str(port) +", " + formatted_time)
-            print(str(msg))
+        for result in parser.results():
+            formatted_time = time.strftime("%d %b %Y %H:%M:%S %Z", time.localtime(result.timestamp))
+            print(str(result.resolver[0]) + ":" + str(result.resolver[1]) +", " + formatted_time)
+            print(str(result.message))
             print("\n")
