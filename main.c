@@ -117,7 +117,7 @@ void cleanup()
     }
     if(context.logfile)
     {
-        fclose(context.outfile);
+        fclose(context.logfile);
     }
 
     free(context.stat_messages);
@@ -586,6 +586,7 @@ void my_stats_to_msg(stats_exchange_t *stats_msg)
     stats_msg->final_rcodes[STAT_IDX_REFUSED] = context.stats.final_rcodes[DNS_RCODE_REFUSED];
     stats_msg->final_rcodes[STAT_IDX_FORMERR] = context.stats.final_rcodes[DNS_RCODE_FORMERR];
     stats_msg->current_rate = context.stats.current_rate;
+    stats_msg->success_rate = context.stats.success_rate;
     stats_msg->numparsed = context.stats.numparsed;
     for(size_t i = 0; i <= context.cmd_args.resolve_count; i++)
     {
@@ -615,6 +616,7 @@ void check_progress()
             "Received packets: %zu\n"
             "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
             "Current incoming rate: %zu pps, average: %zu pps\n"
+            "Current success rate: %zu pps, average: %zu pps\n"
             "Finished total: %zu, success: %zu (%.2f%%)\n"
             "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
             "Failures: %s\n"
@@ -629,6 +631,7 @@ void check_progress()
 
     time_t elapsed_ns = (now.tv_sec - last_time.tv_sec) * 1000000000 + (now.tv_nsec - last_time.tv_nsec);
     size_t rate_pps = elapsed_ns == 0 ? 0 : context.stats.current_rate * TIMED_RING_S / elapsed_ns;
+    size_t rate_success = elapsed_ns == 0 ? 0 : context.stats.success_rate * TIMED_RING_S / elapsed_ns;
     last_time = now;
 
     // Send the stats of the child to the parent process
@@ -684,6 +687,7 @@ void check_progress()
     if(context.cmd_args.num_processes == 1)
     {
         size_t average_pps = elapsed == 0 ? rate_pps : context.stats.numreplies * TIMED_RING_S / total_elapsed_ns;
+        size_t average_success = elapsed == 0 ? rate_success : context.stats.finished_success * TIMED_RING_S / total_elapsed_ns;
 
         // Print the detailed timeout stats (number of tries before timeout) to the timeouts buffer.
         int offset = 0;
@@ -703,6 +707,7 @@ void check_progress()
                 context.stats.numdomains,
                 context.stats.numreplies,
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
+                rate_success, average_success,
                 context.stats.finished,
                 stat_abs_share(context.stats.finished_success, context.stats.finished),
                 stat_abs_share(context.stats.mismatch_domain, context.stats.numparsed),
@@ -742,10 +747,13 @@ void check_progress()
                 context.stat_messages[0].final_rcodes[i] += context.stat_messages[j].final_rcodes[i];
             }
             rate_pps += context.stat_messages[j].current_rate;
+            rate_success += context.stat_messages[j].success_rate;
         }
 
         size_t average_pps = elapsed == 0 ? rate_pps :
                              context.stat_messages[0].numreplies * TIMED_RING_S / total_elapsed_ns;
+        size_t average_success = elapsed == 0 ? rate_pps :
+                             context.stat_messages[0].finished_success * TIMED_RING_S / total_elapsed_ns;
 
 
         // Print the detailed timeout stats (number of tries before timeout) to the timeouts buffer.
@@ -766,6 +774,7 @@ void check_progress()
                 context.stat_messages[0].numdomains,
                 context.stat_messages[0].numreplies,
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
+                rate_success, average_success,
                 context.stat_messages[0].finished,
                 stat_abs_share(context.stat_messages[0].finished_success, context.stat_messages[0].finished),
                 stat_abs_share(context.stat_messages[0].mismatch_domain, context.stat_messages[0].numparsed),
@@ -782,6 +791,7 @@ void check_progress()
 
 end_stats:
     context.stats.current_rate = 0;
+    context.stats.success_rate = 0;
     // Call this function in about one second again
     timed_ring_add(&context.ring, TIMED_RING_S, check_progress);
 }
@@ -937,6 +947,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         lookup_done(lookup);
         context.stats.finished_success++;
         context.stats.final_rcodes[packet.head.header.rcode]++;
+        context.stats.success_rate++;
 
         // Print packet
         time_t now = time(NULL);

@@ -58,6 +58,7 @@ typedef struct {
     size_t all_rcodes[5];
     size_t final_rcodes[5];
     size_t current_rate;
+    size_t success_rate;
     size_t numparsed;
 } stats_exchange_t;
 
@@ -198,6 +199,7 @@ typedef struct
         size_t numdomains;
         struct timespec last_print;
         size_t current_rate;
+        size_t success_rate;
         size_t timeouts[0x100];
         size_t final_rcodes[0x10000];
         size_t all_rcodes[0x10000];
