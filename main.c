@@ -63,8 +63,20 @@ void print_help()
                     "Output flags:\n"
                     "  S - simple text output\n"
                     "  F - full text output\n"
-                    "  B - binary output\n",
-            context.cmd_args.argv[0] ? context.cmd_args.argv[0] : "massdns"
+                    "  B - binary output\n"
+                    "\n"
+                    "Advanced flags for the simple output mode:\n"
+                    "  d - Include records from the additional section.\n"
+                    "  i - Indent any reply record.\n"
+                    "  l - Separate replies using a line feed.\n"
+                    "  m - Only output reply records that match the question name.\n"
+                    "  n - Include records from the answer section.\n"
+                    "  q - Print the question.\n"
+                    "  r - Prepend resolver IP address, Unix timestamp and return code to the question line.\n"
+                    "  s - Separate packet sections using a line feed.\n"
+                    "  t - Include TTL and record class within the output.\n"
+                    "  u - Include records from the authority section.\n",
+                    context.cmd_args.argv[0] ? context.cmd_args.argv[0] : "massdns"
     );
 }
 

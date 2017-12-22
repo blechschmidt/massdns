@@ -5,11 +5,15 @@ MassDNS is a simple high-performance DNS stub resolver targetting those who seek
 names in the order of millions or even billions. Without special configuration, MassDNS is capable of resolving over
 500,000 names per second using publicly available resolvers.
 
+## Major changes
 This version of MassDNS is currently experimental. In order to speed up the resolving process, the `ldns` dependency has
 been replaced by a custom stack-based DNS implementation (which currently only supports the text representation of the
 most common DNS records). Furthermore, epoll has been introduced in order to lighten CPU usage when operating with a low
-concurrency. In case of bugs, please create an issue and
+concurrency which may have broken compatibility with some platforms. In case of bugs, please create an issue and
 [switch to the more mature version 0.2](https://github.com/blechschmidt/massdns/tree/v0.2).
+
+Also note that the command line interface has changed slightly due to criticism of the output complexity. Additionally,
+the default value of the `-s` and `-i` parameters have been changed. The repository structure has been changed as well.
 
 ## Contributors
 * [Quirin Scheitle](https://github.com/quirins), [Technical University of Munich](https://www.net.in.tum.de/members/scheitle/)
@@ -23,13 +27,12 @@ Usage: ./bin/massdns [options] [domainlist]
   -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
       --drop-user        User to drop privileges to when running as root. (Default: nobody)
-      --finalstats       Write final stats to STDERR when done.
       --flush            Flush the output file whenever a response was received.
   -h  --help             Show this help.
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same
                          domain. (Default: 500)
   -l  --error-log        Error log file path. (Default: /dev/stderr)
-  -n  --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
+      --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
   -o  --output           Flags for output formatting.
       --predictable      Use resolvers incrementally. Useful for resolver tests.
       --processes        Number of processes to be used for resolving. (Default: 1)
@@ -43,15 +46,15 @@ Usage: ./bin/massdns [options] [domainlist]
       --sticky           Do not switch the resolver when retrying.
       --socket-count     Socket count per process. (Default: 1)
   -t  --type             Record type to be resolved. (Default: A)
+      --verify-ip        Verify IP addresses of incoming replies.
   -w  --outfile          Write to the specified output file instead of standard output.
-  -x  --extreme          Value between 0 and 2 specifying transmission aggression. (Default: 0)
 
 Output flags:
   S - simple text output
   F - full text output
   B - binary output
 ```
-By default, MassDNS will print status information on standard error, results are written to stdout.
+This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.
 
 ### Example
 Resolve all AAAA records from domains within domains.txt using the resolvers within `resolvers.txt` in `lists` and
@@ -103,6 +106,8 @@ Please note that the labels within `in-addr.arpa` are reversed. In order to reso
 As a consequence, the Python script does not resolve the records in an ascending order which is an advantage because sudden heavy spikes at the name servers of IPv4 subnets are avoided.
 
 #### Reconnaissance by brute-forcing subdomains
+**Perform reconnaissance scans responsibly and adjust the `-s` parameter to not overwhelm authoritative name servers.**
+
 Similar to [subbrute](https://github.com/TheRook/subbrute), MassDNS allows you to brute force subdomains using the included `subbrute.py` script:
 ```
 $ ./scripts/subbrute.py lists/names.txt example.com | ./bin/massdns -r lists/resolvers.txt -t A -o S -w results.txt
@@ -141,3 +146,4 @@ If the authenticity of results is highly essential, you should not rely on the i
 - Add wildcard detection for reconnaissance
 - Improve reconnaissance reliability by adding a mode which re-resolves found domains through a list of trusted (local) resolvers in order to eliminate false positives
 - Detect optimal concurrency automatically
+- Parse the command line properly and allow the usage/combination of short options without spaces
