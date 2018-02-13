@@ -165,15 +165,14 @@ typedef struct
         bool use_pcap;
         size_t num_processes;
         size_t socket_count;
+        bool busypoll;
     } cmd_args;
 
     struct
     {
         buffer_t interfaces4; // Sockets used for receiving queries
         buffer_t interfaces6; // Sockets used for receiving queries
-        buffer_t queries; // Sockets used for sending out queries
         int *pipes;
-        socket_info_t read_pipe;
         socket_info_t write_pipe;
         socket_info_t *master_pipes_read;
     } sockets;
