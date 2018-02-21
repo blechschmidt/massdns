@@ -1508,11 +1508,14 @@ void run()
         }
     }
 
-    context.domainfile = fopen(context.cmd_args.domains, "r");
-    if (context.domainfile == NULL)
+    if(context.domainfile != stdin)
     {
-        log_msg("Failed to open domain file \"%s\".\n", context.cmd_args.domains);
-        clean_exit(EXIT_FAILURE);
+        context.domainfile = fopen(context.cmd_args.domains, "r");
+        if (context.domainfile == NULL)
+        {
+            log_msg("Failed to open domain file \"%s\".\n", context.cmd_args.domains);
+            clean_exit(EXIT_FAILURE);
+        }
     }
 
     if(context.cmd_args.output == OUTPUT_BINARY)
@@ -1971,7 +1974,7 @@ int parse_cmd(int argc, char **argv)
         }
     }
 
-    if(context.domainfile == stdin && context.cmd_args.num_processes > 0)
+    if(context.domainfile == stdin && context.cmd_args.num_processes > 1)
     {
         log_msg("In order to use multiprocessing, the domain list needs to be supplied as file.\n");
         clean_exit(EXIT_FAILURE);
