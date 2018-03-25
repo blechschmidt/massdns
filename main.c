@@ -37,7 +37,7 @@ void print_help()
                     "Usage: %s [options] [domainlist]\n"
                     "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
 #ifdef HAVE_EPOLL
-                    "      --busypoll         Increase performance using busy polling instead of epoll.\n"
+                    "      --busy-poll        Increase performance using busy polling instead of epoll.\n"
 #endif
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-group       Group to drop privileges to when running as root. If unspecified,\n"
@@ -1691,7 +1691,7 @@ int parse_cmd(int argc, char **argv)
             print_help();
             clean_exit(EXIT_SUCCESS);
         }
-        else if (strcmp(argv[i], "--busypoll") == 0)
+        else if (strcmp(argv[i], "--busypoll") == 0 || strcmp(argv[i], "--busy-poll") == 0)
         {
             context.cmd_args.busypoll = true;
         }
