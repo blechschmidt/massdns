@@ -150,6 +150,7 @@ typedef struct
         int sndbuf;
         int rcvbuf;
         char *drop_user;
+        char *drop_group;
         dns_record_type record_type;
         size_t timed_ring_buckets;
         int extreme; // Do not remove EPOLLOUT after warmup
