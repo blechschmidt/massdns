@@ -16,7 +16,9 @@
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <stddef.h>
-#include <sys/sysinfo.h>
+#ifdef HAVE_SYSINFO
+    #include <sys/sysinfo.h>
+#endif
 #include <limits.h>
 #include <stdarg.h>
 
@@ -33,7 +35,9 @@ void print_help()
     fprintf(stderr, ""
                     "Usage: %s [options] [domainlist]\n"
                     "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
+#ifdef HAVE_EPOLL
                     "      --busypoll         Increase performance using busy polling instead of epoll.\n"
+#endif
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
@@ -459,10 +463,12 @@ void end_warmup()
 #ifdef PCAP_SUPPORT
         if(!context.pcap)
 #endif
+#ifdef HAVE_EPOLL
         {
             add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces4);
             add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces6);
         }
+#endif
     }
 }
 
@@ -1318,7 +1324,7 @@ void pcap_setup()
     {
         goto pcap_error;
     }
-
+#ifdef HAVE_EPOLL
     struct epoll_event ev;
     bzero(&ev, sizeof(ev));
     ev.data.ptr = &context.pcap_info;
@@ -1328,6 +1334,7 @@ void pcap_setup()
         log_msg("Failed to add epoll event: %s\n", strerror(errno));
         clean_exit(EXIT_FAILURE);
     }
+#endif
     return;
 
 pcap_error:
@@ -1380,6 +1387,7 @@ void setup_pipes()
                 continue;
             }
 
+#ifdef HAVE_EPOLL
             // Add all pipes the main process can read from to the epoll descriptor
             struct epoll_event ev;
             bzero(&ev, sizeof(ev));
@@ -1390,6 +1398,7 @@ void setup_pipes()
                 log_msg("Failed to add epoll event: %s\n", strerror(errno));
                 clean_exit(EXIT_FAILURE);
             }
+#endif
         }
     }
     else // It's a child process
@@ -1451,17 +1460,21 @@ void run()
 
     timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
 
+#ifdef HAVE_EPOLL
     uint32_t socket_events = EPOLLOUT;
 
     struct epoll_event pevents[100000];
     bzero(pevents, sizeof(pevents));
+#endif
 
     init_pipes();
     context.fork_index = split_process(context.cmd_args.num_processes);
+#ifdef HAVE_EPOLL
     if(!context.cmd_args.busypoll)
     {
         context.epollfd = epoll_create(1);
     }
+#endif
 #ifdef PCAP_SUPPORT
     if(context.cmd_args.use_pcap)
     {
@@ -1469,9 +1482,11 @@ void run()
     }
     else
 #endif
+#ifdef HAVE_EPOLL
     {
         socket_events |= EPOLLIN;
     }
+#endif
     if(context.cmd_args.num_processes > 1)
     {
         setup_pipes();
@@ -1532,11 +1547,13 @@ void run()
 
     privilege_drop();
 
+#ifdef HAVE_EPOLL
     if(!context.cmd_args.busypoll)
     {
         add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces4);
         add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
     }
+#endif
 
 
     clock_gettime(CLOCK_MONOTONIC, &context.stats.start_time);
@@ -1544,6 +1561,7 @@ void run()
 
     if(!context.cmd_args.busypoll)
     {
+#ifdef HAVE_EPOLL
         while(context.state < STATE_DONE)
         {
 
@@ -1584,6 +1602,7 @@ void run()
                 timed_ring_handle(&context.ring, ring_timeout);
             }
         }
+#endif
     }
     else
     {
@@ -1656,6 +1675,9 @@ int parse_cmd(int argc, char **argv)
     context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = true;
     context.cmd_args.num_processes = 1;
     context.cmd_args.socket_count = 1;
+#ifndef HAVE_EPOLL
+    context.cmd_args.busypoll = true;
+#endif
 
     for (int i = 1; i < argc; i++)
     {
@@ -1869,6 +1891,10 @@ int parse_cmd(int argc, char **argv)
             context.cmd_args.num_processes = (size_t) expect_arg_nonneg(i++, 0, SIZE_MAX);
             if(context.cmd_args.num_processes == 0)
             {
+#ifndef HAVE_SYSINFO
+                    log_msg("No support for detecting the number of cores automatically.\n");
+                    clean_exit(EXIT_FAILURE);
+#else
                 int cores = get_nprocs_conf();
                 if(cores <= 0)
                 {
@@ -1876,6 +1902,7 @@ int parse_cmd(int argc, char **argv)
                     clean_exit(EXIT_FAILURE);
                 }
                 context.cmd_args.num_processes = (size_t)cores;
+#endif
             }
         }
         else if (strcmp(argv[i], "--socket-count") == 0)

@@ -6,7 +6,9 @@
 #include <net/if.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
+#ifdef PCAP_SUPPORT
+    #include <sys/ioctl.h>
+#endif
 #include <inttypes.h>
 
 #define loop_sockets(sockets) \
@@ -46,6 +48,7 @@ void socket_noblock(socket_info_t* socket)
     fcntl(sd, F_SETFL, flags | O_NONBLOCK);
 }
 
+#ifdef HAVE_EPOLL
 void add_sockets(int epollfd, uint32_t events, int op, buffer_t *sockets)
 {
     socket_info_t *interface_sockets = sockets->data;
@@ -62,6 +65,7 @@ void add_sockets(int epollfd, uint32_t events, int op, buffer_t *sockets)
         }
     }
 }
+#endif
 
 bool str_to_addr(char *str, uint16_t default_port, struct sockaddr_storage *addr)
 {
@@ -136,6 +140,7 @@ bool str_to_addr(char *str, uint16_t default_port, struct sockaddr_storage *addr
     return false;
 }
 
+#ifdef PCAP_SUPPORT
 int get_iface_hw_addr(char *iface, uint8_t *hw_mac)
 {
     int s;
@@ -171,6 +176,7 @@ int get_iface_hw_addr_readable(char *iface, char *hw_mac)
     }
     return result;
 }
+#endif
 
 char *sockaddr2str(struct sockaddr_storage *addr)
 {

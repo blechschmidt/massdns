@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include <time.h>
 #include <sys/socket.h>
-#include <sys/epoll.h>
+#ifdef HAVE_EPOLL
+    #include <sys/epoll.h>
+#endif
 #include <netinet/in.h>
 #include <arpa/inet.h>
 //#define PCAP_SUPPORT
