@@ -23,6 +23,7 @@
 
 #define MAXIMUM_MODULE_COUNT 0xFF
 #define COMMON_UNPRIVILEGED_USER "nobody"
+#define COMMON_UNPRIVILEGED_GROUP "nogroup"
 
 const uint32_t OUTPUT_BINARY_VERSION = 0x00;
 

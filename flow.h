@@ -17,6 +17,7 @@ static void kill_process_group(int sig)
     }
     received_termination = 1;
     kill(0, sig);
+    exit(0);
 }
 
 static void handle_termination()
@@ -47,7 +48,10 @@ size_t split_process(size_t times)
                 break;
         }
     }
-    handle_termination();
+    if(times > 1)
+    {
+        handle_termination();
+    }
     return 0;
 }
 

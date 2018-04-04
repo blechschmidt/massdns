@@ -37,11 +37,10 @@ void print_help()
                     "Usage: %s [options] [domainlist]\n"
                     "  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)\n"
 #ifdef HAVE_EPOLL
-                    "      --busy-poll        Increase performance using busy polling instead of epoll.\n"
+                    "      --busy-poll        Use busy-wait polling instead of epoll.\n"
 #endif
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
-                    "      --drop-group       Group to drop privileges to when running as root. If unspecified,\n"
-                    "                         privileges will be dropped to the group as specified by --drop-user\n"
+                    "      --drop-group       Group to drop privileges to when running as root. (Default: nogroup)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
@@ -1231,12 +1230,12 @@ void privilege_drop()
         return;
     }
     char *username = context.cmd_args.drop_user ? context.cmd_args.drop_user : COMMON_UNPRIVILEGED_USER;
-    char *groupname = context.cmd_args.drop_group ? context.cmd_args.drop_group : username;
+    char *groupname = context.cmd_args.drop_group ? context.cmd_args.drop_group : COMMON_UNPRIVILEGED_GROUP;
     if(!context.cmd_args.root)
     {
         struct passwd *drop_user = getpwnam(username);
         struct group *drop_group = getgrnam(groupname);
-        if (drop_group && drop_user && setgid(drop_group->gr_gid) && setuid(drop_user->pw_uid) == 0)
+        if (drop_group && drop_user && setgid(drop_group->gr_gid) == 0 && setuid(drop_user->pw_uid) == 0)
         {
             if (!context.cmd_args.quiet)
             {
@@ -1246,7 +1245,7 @@ void privilege_drop()
         else
         {
             log_msg("Privileges could not be dropped to \"%s:%s\".\n"
-                "For security reasons, this program will only run as root user when supplied with --root"
+                "For security reasons, this program will only run as root user when supplied with --root, "
                 "which is not recommended.\n"
                 "It is better practice to run this program as a different user.\n", username, groupname);
             clean_exit(EXIT_FAILURE);
