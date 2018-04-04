@@ -567,13 +567,17 @@ void send_query(lookup_t *lookup)
 
     // Set or unset the QD bit based on user preference
     dns_buf_set_rd(query_buffer, !context.cmd_args.norecurse);
-
+    
+    errno = 0;
     ssize_t sent = sendto(lookup->socket->descriptor, query_buffer, (size_t) result, 0,
                           (struct sockaddr *) &lookup->resolver->address,
                           sizeof(lookup->resolver->address));
     if(sent != result)
     {
-        log_msg("Error sending: %s\n", strerror(errno));
+        if(errno != EAGAIN && errno != EWOULDBLOCK)
+        {
+            log_msg("Error sending: %s\n", strerror(errno));
+        }
     }
 }
 
