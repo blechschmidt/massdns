@@ -1437,6 +1437,18 @@ void read_control_message(socket_info_t *socket_info)
 
 }
 
+void make_query_sockets_nonblocking()
+{
+    for(size_t i = 0; i < context.sockets.interfaces4.len; i++)
+    {
+        socket_noblock(((socket_info_t*)context.sockets.interfaces4.data) + i);
+    }
+    for(size_t i = 0; i < context.sockets.interfaces6.len; i++)
+    {
+        socket_noblock(((socket_info_t*)context.sockets.interfaces6.data) + i);
+    }
+}
+
 void run()
 {
     static char multiproc_outfile_name[8192];
@@ -1558,6 +1570,10 @@ void run()
         add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
     }
 #endif
+    if(context.cmd_args.busypoll)
+    {
+        make_query_sockets_nonblocking();
+    }
 
 
     clock_gettime(CLOCK_MONOTONIC, &context.stats.start_time);
@@ -1619,7 +1635,7 @@ void run()
             }
             for(size_t i = 0; i < context.sockets.interfaces6.len; i++)
             {
-                can_read(((socket_info_t*)context.sockets.interfaces4.data) + i);
+                can_read(((socket_info_t*)context.sockets.interfaces6.data) + i);
             }
             timed_ring_handle(&context.ring, ring_timeout);
 
