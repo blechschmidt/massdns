@@ -48,6 +48,19 @@ void socket_noblock(socket_info_t* socket)
     fcntl(sd, F_SETFL, flags | O_NONBLOCK);
 }
 
+socklen_t sockaddr_storage_size(struct sockaddr_storage *storage)
+{
+    if(storage->ss_family == AF_INET)
+    {
+        return sizeof(struct sockaddr_in);
+    }
+    else if(storage->ss_family == AF_INET6)
+    {
+        return sizeof(struct sockaddr_in6);
+    }
+    return 0;
+}
+
 #ifdef HAVE_EPOLL
 void add_sockets(int epollfd, uint32_t events, int op, buffer_t *sockets)
 {

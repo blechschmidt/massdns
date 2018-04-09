@@ -571,7 +571,7 @@ void send_query(lookup_t *lookup)
     errno = 0;
     ssize_t sent = sendto(lookup->socket->descriptor, query_buffer, (size_t) result, 0,
                           (struct sockaddr *) &lookup->resolver->address,
-                          sizeof(lookup->resolver->address));
+                          sockaddr_storage_size(&lookup->resolver->address));
     if(sent != result)
     {
         if(errno != EAGAIN && errno != EWOULDBLOCK)
