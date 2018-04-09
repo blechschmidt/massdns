@@ -770,7 +770,7 @@ char *dns_opcode2str(dns_opcode opcode)
         case DNS_OPCODE_UPDATE:
             return "UPDATE";
         default:
-            snprintf(numbuf, sizeof(numbuf), "%" PRIu16, opcode);
+            snprintf(numbuf, sizeof(numbuf), "%" PRIu16, (uint16_t)opcode);
             return numbuf;
     }
 }
@@ -818,7 +818,7 @@ char *dns_rcode2str(dns_rcode rcode)
         case DNS_RCODE_BADCOOKIE:
             return "BADCOOKIE";
         default:
-            snprintf(numbuf, sizeof(numbuf), "%" PRIu16, rcode);
+            snprintf(numbuf, sizeof(numbuf), "%" PRIu16, (uint16_t)rcode);
             return numbuf;
     }
 }
@@ -910,7 +910,7 @@ char *dns_record_type2str(dns_record_type type)
         case DNS_REC_URI:
             return "URI";
         default:
-            snprintf(numbuf, sizeof(numbuf), "%" PRIu16, type);
+            snprintf(numbuf, sizeof(numbuf), "%" PRIu16, (uint16_t)type);
             return numbuf;
     }
 }
@@ -1398,7 +1398,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             {
                 goto raw;
             }
-            int written = sprintf(ptr, "%" PRIu8 " ", record->data.raw[0] >> 7);
+            int written = sprintf(ptr, "%" PRIu8 " ", (uint8_t)(record->data.raw[0] >> 7));
             if(written < 0)
             {
                 return buf;
@@ -1408,7 +1408,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             *(ptr++) = ' ';
             *(ptr++) = '"';
             dns_print_readable(&ptr, sizeof(buf), record->data.raw + 2 + record->data.raw[1],
-                               record->length - record->data.raw[1] - 2);
+                               (size_t)(record->length - record->data.raw[1] - 2));
             *(ptr++) = '"';
             *ptr = 0;
             break;

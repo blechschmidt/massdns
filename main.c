@@ -1062,7 +1062,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     else
                     {
                         fprintf(context.outfile,
-                                "%s%s%s %s %" PRIu16 " %s %s\n",
+                                "%s%s%s %s %" PRIu32 " %s %s\n",
                                 section_separator,
                                 context.format.indent_sections ? "\t" : "",
                                 dns_name2str(&rec.name),
