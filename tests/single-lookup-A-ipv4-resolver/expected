@@ -1,0 +1,13 @@
+;; Server: 8.8.8.8:53
+;; Size: [0-9]+
+;; Unix time: [0-9]+
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: [0-9]+
+;; flags: qr rd ra ; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+google-public-dns-a.google.com. IN A
+
+;; ANSWER SECTION:
+google-public-dns-a.google.com. [0-9]+ IN A 8.8.8.8
+
+
