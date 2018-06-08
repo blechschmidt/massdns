@@ -496,6 +496,12 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     }
 
     key->type = type;
+    if(hashmapGet(context.map, key) != NULL)
+    {
+        *new = false;
+        return NULL;
+    }
+    *new = true;
 
     //lookup_t *value = safe_calloc(sizeof(*value));
     value->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, value);
@@ -503,7 +509,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     value->key = key;
 
     errno = 0;
-    *new = (hashmapPut(context.map, key, value) == NULL);
+    hashmapPut(context.map, key, value);
     if(errno != 0)
     {
         log_msg("Error putting lookup into hashmap: %s\n", strerror(errno));
@@ -833,18 +839,13 @@ void can_send()
         if(!next_query(&qname))
         {
             context.state = STATE_COOLDOWN; // We will not create any new queries
-            if(hashmapSize(context.map) <= 0)
-            {
-                done();
-            }
             break;
-            continue;
         }
         context.stats.numdomains++;
         lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
         if(!new)
         {
-            break;
+            continue;
         }
         send_query(lookup);
     }
@@ -966,7 +967,6 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     else
     {
         // We are done with the lookup because we received an acceptable reply.
-        lookup_done(lookup);
         context.stats.finished_success++;
         context.stats.final_rcodes[packet.head.header.rcode]++;
         context.stats.success_rate++;
@@ -1079,6 +1079,8 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 break;
         }
 
+        lookup_done(lookup);
+        
         // Sometimes, users may want to obtain results immediately.
         if(context.cmd_args.flush)
         {
@@ -1470,7 +1472,7 @@ void run()
         clean_exit(EXIT_FAILURE);
     }
 
-    context.lookup_pool.len = context.cmd_args.hashmap_size * 2;
+    context.lookup_pool.len = context.cmd_args.hashmap_size;
     context.lookup_pool.data = safe_calloc(context.lookup_pool.len * sizeof(void*));
     context.lookup_space = safe_calloc(context.lookup_pool.len * sizeof(*context.lookup_space));
     for(size_t i = 0; i < context.lookup_pool.len; i++)
