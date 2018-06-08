@@ -476,7 +476,6 @@ void end_warmup()
 
 lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
 {
-    //lookup_key_t *key = safe_malloc(sizeof(*key));
     if(context.lookup_pool.len == 0)
     {
         log_msg("Empty lookup pool.\n");
@@ -484,9 +483,6 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     }
     lookup_entry_t *entry = ((lookup_entry_t**)context.lookup_pool.data)[--context.lookup_pool.len];
     lookup_key_t *key = &entry->key;
-    lookup_t *value = &entry->value;
-    bzero(value, sizeof(*value));
-
 
     key->name.length = (uint8_t)string_copy((char*)key->name.name, qname, sizeof(key->name.name));
     if(key->name.name[key->name.length - 1] != '.')
@@ -498,12 +494,14 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     key->type = type;
     if(hashmapGet(context.map, key) != NULL)
     {
+        context.lookup_pool.len++;
         *new = false;
         return NULL;
     }
     *new = true;
+    lookup_t *value = &entry->value;
+    bzero(value, sizeof(*value));
 
-    //lookup_t *value = safe_calloc(sizeof(*value));
     value->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, value);
     urandom_get(&value->transaction, sizeof(value->transaction));
     value->key = key;
