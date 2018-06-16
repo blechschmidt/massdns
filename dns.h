@@ -733,7 +733,7 @@ static inline void dns_buffer_set_id(uint8_t *buf, uint16_t id)
 
 char *dns_class2str(dns_class cls)
 {
-    static char numbuf[6];
+    static char numbuf[16];
 
     switch(cls)
     {
@@ -755,7 +755,7 @@ char *dns_class2str(dns_class cls)
 
 char *dns_opcode2str(dns_opcode opcode)
 {
-    static char numbuf[3];
+    static char numbuf[16];
 
     switch(opcode)
     {
@@ -777,7 +777,7 @@ char *dns_opcode2str(dns_opcode opcode)
 
 char *dns_rcode2str(dns_rcode rcode)
 {
-    static char numbuf[6];
+    static char numbuf[16];
 
     switch (rcode)
     {
@@ -825,7 +825,7 @@ char *dns_rcode2str(dns_rcode rcode)
 
 char *dns_record_type2str(dns_record_type type)
 {
-    static char numbuf[6];
+    static char numbuf[16];
 
     switch (type)
     {
