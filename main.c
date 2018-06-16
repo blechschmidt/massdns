@@ -146,17 +146,20 @@ void cleanup()
 
 void log_msg(const char* format, ...)
 {
-    va_list args;
-    va_start(args, format);
     if(context.logfile != stderr)
     {
+        va_list args;
+        va_start(args, format);
         vfprintf(stderr, format, args);
+        va_end(args);
     }
     if(context.logfile)
     {
+        va_list args;
+        va_start(args, format);
         vfprintf(context.logfile, format, args);
+        va_end(args);
     }
-    va_end(args);
 }
 
 void clean_exit(int status)
