@@ -409,6 +409,7 @@ bool next_query(char **qname)
         {
             continue;
         }
+        trim_end(line);
         if (*line == 0)
         {
             continue;
