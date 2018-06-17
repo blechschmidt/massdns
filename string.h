@@ -62,14 +62,14 @@ char *trim_start(char *str)
 
 void trim_end(char* str)
 {
-    char *last = str + strlen(str);
+    char *last = str + strlen(str) - 1;
     while (last >= str)
     {
-        if(isspace(*last))
+        if(!isspace(*last))
         {
-            *last = 0;
             return;
         }
+        *last = 0;
         last--;
     }
 }
