@@ -14,3 +14,4 @@ cmake-build-debug/
 *.igno
 *.ignore
 *.pyc
+.vscode
