@@ -105,7 +105,8 @@ typedef enum
 {
     OUTPUT_TEXT_FULL,
     OUTPUT_TEXT_SIMPLE,
-    OUTPUT_BINARY
+    OUTPUT_BINARY,
+    OUTPUT_NDJSON
 } output_t;
 
 const char *default_interfaces[] = {""};
