@@ -112,4 +112,81 @@ bool startswith(char* haystack, char* needle, bool case_sensitive) // Supports A
     }
 }
 
+// JSON requires some escaping
+// https://stackoverflow.com/users/10320/dreamlax
+size_t string_escape(char *dst, const char *src, size_t dstLen)
+{
+    const char complexCharMap[] = "abtnvfr";
+
+    size_t i;
+    size_t srcLen = strlen(src);    
+    size_t dstIdx = 0;
+
+    if (dst == NULL || dstLen == 0) dstLen = SIZE_MAX;
+
+    for (i = 0; i < srcLen && dstIdx < dstLen; i++)
+    {
+        size_t complexIdx = 0;
+
+        switch (src[i])
+        {
+            case '\'':
+            case '\"':
+            case '\\':
+                if (dst && dstIdx <= dstLen - 2)
+                {
+                    dst[dstIdx++] = '\\';
+                    dst[dstIdx++] = src[i];
+                }
+                else dstIdx += 2;
+                break;
+
+            case '\r': complexIdx++;
+            case '\f': complexIdx++;
+            case '\v': complexIdx++;
+            case '\n': complexIdx++;
+            case '\t': complexIdx++;
+            case '\b': complexIdx++;
+            case '\a':
+                if (dst && dstIdx <= dstLen - 2)
+                {
+                    dst[dstIdx++] = '\\';
+                    dst[dstIdx++] = complexCharMap[complexIdx];
+                }
+                else dstIdx += 2;
+                break;
+
+            default:
+                if (isprint(src[i]))
+                {
+                    // simply copy the character
+                    if (dst)
+                        dst[dstIdx++] = src[i];
+                    else
+                        dstIdx++;
+                }
+                else
+                {
+                    // produce octal escape sequence
+                    if (dst && dstIdx <= dstLen - 4)
+                    {
+                        dst[dstIdx++] = '\\';
+                        dst[dstIdx++] = ((src[i] & 0300) >> 6) + '0';
+                        dst[dstIdx++] = ((src[i] & 0070) >> 3) + '0';
+                        dst[dstIdx++] = ((src[i] & 0007) >> 0) + '0';
+                    }
+                    else
+                    {
+                        dstIdx += 4;
+                    }
+                }
+        }
+    }
+
+    if (dst && dstIdx <= dstLen)
+        dst[dstIdx] = '\0';
+
+    return dstIdx;
+}
+
 #endif
