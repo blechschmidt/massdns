@@ -441,27 +441,6 @@ int hash_lookup_key(void *key)
     return (int)hash;
 }
 
-
-// Converts a DNS name to the heap and makes sure it is a FQDN (appends a trailing dot)
-// The result needs to be freed
-char *canonicalized_name_copy(const char *qname)
-{
-    size_t len = strlen(qname);
-    bool canonical = len > 0 && qname[len - 1] == '.';
-    if(canonical)
-    {
-        return strmcpy(qname);
-    }
-    else
-    {
-        char *result = safe_malloc(len + 2);
-        memcpy(result, qname, len);
-        result[len] = '.';
-        result[len + 1] = 0;
-        return result;
-    }
-}
-
 void end_warmup()
 {
     context.state = STATE_QUERYING;
@@ -1199,7 +1178,7 @@ void can_read(socket_info_t *info)
 
 bool cmp_lookup(void *lookup1, void *lookup2)
 {
-    return dns_names_eq(&((lookup_key_t *) lookup1)->name, &((lookup_key_t *) lookup1)->name);
+    return dns_names_eq(&((lookup_key_t *) lookup1)->name, &((lookup_key_t *) lookup2)->name);
     //return strcasecmp(((lookup_key_t *) lookup1)->domain,((lookup_key_t *) lookup2)->domain) == 0;
 }
 
