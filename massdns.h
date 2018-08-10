@@ -63,6 +63,7 @@ typedef struct {
     size_t current_rate;
     size_t success_rate;
     size_t numparsed;
+    bool done;
 } stats_exchange_t;
 
 typedef struct
@@ -98,6 +99,7 @@ typedef enum
     STATE_WARMUP, // Before the hash map size has been reached
     STATE_QUERYING,
     STATE_COOLDOWN,
+    STATE_WAIT_CHILDREN,
     STATE_DONE
 } state_t;
 
@@ -181,6 +183,11 @@ typedef struct
         socket_info_t write_pipe;
         socket_info_t *master_pipes_read;
     } sockets;
+
+    // Processes
+    size_t finished;
+    pid_t *pids;
+    bool *done;
 
     FILE* outfile;
     FILE* logfile;

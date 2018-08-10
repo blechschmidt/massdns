@@ -27,8 +27,12 @@ static void handle_termination()
 }
 
 // times is the number of resulting processes, i.e. if times is two, the process will fork once
-size_t split_process(size_t times)
+size_t split_process(size_t times, pid_t *pids)
 {
+    if(pids != NULL)
+    {
+        pids[0] = getpid();
+    }
     for (size_t i = 0; i < times - 1; i++)
     {
         pid_t child = fork();
@@ -45,6 +49,10 @@ size_t split_process(size_t times)
                 return i + 1;
             }
             default:
+                if(pids != NULL)
+                {
+                    pids[i + 1] = child;
+                }
                 break;
         }
     }

@@ -143,6 +143,8 @@ void cleanup()
     }
     free(context.sockets.pipes);
     free(context.sockets.master_pipes_read);
+    free(context.pids);
+    free(context.done);
 }
 
 void log_msg(const char* format, ...)
@@ -617,6 +619,7 @@ void my_stats_to_msg(stats_exchange_t *stats_msg)
     stats_msg->current_rate = context.stats.current_rate;
     stats_msg->success_rate = context.stats.success_rate;
     stats_msg->numparsed = context.stats.numparsed;
+    stats_msg->done = (context.state >= STATE_DONE);
     for(size_t i = 0; i <= context.cmd_args.resolve_count; i++)
     {
         stats_msg->timeouts[i] = context.stats.timeouts[i];
@@ -827,7 +830,20 @@ end_stats:
 
 void done()
 {
-    context.state = STATE_DONE;
+    context.done[context.fork_index] = true;
+    if(context.fork_index != 0 || context.cmd_args.num_processes == 1)
+    {
+        context.state = STATE_DONE;
+    }
+    else
+    {
+        context.finished++;
+        context.state = (context.finished < context.cmd_args.num_processes ? STATE_WAIT_CHILDREN : STATE_DONE);
+    }
+    if(context.cmd_args.num_processes > 1 && context.fork_index != 0)
+    {
+        send_stats();
+    }
     check_progress();
 }
 
@@ -1463,7 +1479,11 @@ void read_control_message(socket_info_t *socket_info)
     {
         log_msg("Atomic read failed: Read %ld bytes.\n", read_result);
     }
-
+    if(!context.done[process] && context.stat_messages[process].done)
+    {
+        context.finished++;
+        context.done[process] = true;
+    }
 }
 
 void make_query_sockets_nonblocking()
@@ -1513,7 +1533,9 @@ void run()
 #endif
 
     init_pipes();
-    context.fork_index = split_process(context.cmd_args.num_processes);
+    context.pids = safe_calloc(context.cmd_args.num_processes * sizeof(*context.pids));
+    context.done = safe_calloc(context.cmd_args.num_processes * sizeof(*context.done));
+    context.fork_index = split_process(context.cmd_args.num_processes, context.pids);
 #ifdef HAVE_EPOLL
     if(!context.cmd_args.busypoll)
     {
@@ -1646,6 +1668,11 @@ void run()
                     else if ((pevents[i].events & EPOLLIN) && socket_info->type == SOCKET_TYPE_CONTROL)
                     {
                         read_control_message(socket_info);
+                        if(context.finished >= context.cmd_args.num_processes)
+                        {
+                            context.state = STATE_DONE;
+                            break;
+                        }
                     }
                 }
                 timed_ring_handle(&context.ring, ring_timeout);
@@ -1674,6 +1701,11 @@ void run()
                 {
                     read_control_message(context.sockets.master_pipes_read + i);
                 }
+                if(context.finished >= context.cmd_args.num_processes)
+                {
+                    context.state = STATE_DONE;
+                    break;
+                }
             }
         }
     }
@@ -1690,6 +1722,8 @@ void use_stdin()
 
 int parse_cmd(int argc, char **argv)
 {
+    bool domain_param = false;
+
     context.cmd_args.argc = argc;
     context.cmd_args.argv = argv;
     context.cmd_args.help_function = print_help;
@@ -1992,6 +2026,7 @@ int parse_cmd(int argc, char **argv)
             if (context.cmd_args.domains == NULL)
             {
                 context.cmd_args.domains = argv[i];
+                domain_param = true;
                 if (strcmp(argv[i], "-") == 0)
                 {
                     use_stdin();
@@ -2021,6 +2056,7 @@ int parse_cmd(int argc, char **argv)
                         }
                     }
                     fclose(context.domainfile);
+                    context.domainfile = NULL;
                 }
             }
             else
@@ -2046,7 +2082,7 @@ int parse_cmd(int argc, char **argv)
         log_msg("Resolvers are required to be supplied.\n");
         clean_exit(EXIT_FAILURE);
     }
-    if (context.domainfile == NULL)
+    if (!domain_param)
     {
         if(!isatty(STDIN_FILENO))
         {
