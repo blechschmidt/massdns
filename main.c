@@ -917,6 +917,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     static uint8_t *parse_offset;
     static lookup_t *lookup;
     static resolver_t* resolver;
+    static char json_buffer[0xFFFF];
 
     context.stats.current_rate++;
     context.stats.numreplies++;
@@ -1002,14 +1003,12 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
 
                 for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
                 {
-                    char json_buffer[1024];
-
                     fprintf(context.outfile,
                             "{\"query_name\":\"%s\",\"query_type\":\"%s\",",
                             dns_name2str(&packet.head.question.name),
                             dns_record_type2str((dns_record_type) packet.head.question.type));
 
-                    string_escape(&json_buffer[0], dns_raw_record_data2str(&rec, offset, offset + short_len), 1024);
+                    json_escape(json_buffer, dns_raw_record_data2str(&rec, offset, offset + short_len), sizeof(json_buffer));
 
                     fprintf(context.outfile,
                             "\"resp_name\":\"%s\",\"resp_type\":\"%s\",\"data\":\"%s\"}\n",
@@ -1019,7 +1018,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 }
 
                 break;
-    
+
             case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
                 if(context.format.print_question)
                 {
