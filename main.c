@@ -71,6 +71,7 @@ void print_help()
                     "  S - simple text output\n"
                     "  F - full text output\n"
                     "  B - binary output\n"
+                    "  J - ndjson output\n"
                     "\n"
                     "Advanced flags for the simple output mode:\n"
                     "  d - Include records from the additional section.\n"
@@ -916,6 +917,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     static uint8_t *parse_offset;
     static lookup_t *lookup;
     static resolver_t* resolver;
+    static char json_buffer[0xFFFF];
 
     context.stats.current_rate++;
     context.stats.numreplies++;
@@ -995,6 +997,26 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 fprintf(context.outfile, ";; Server: %s\n;; Size: %" PRIu16 "\n;; Unix time: %lu\n",
                         sockaddr2str(recvaddr), short_len, now);
                 dns_print_packet(context.outfile, &packet, offset, len, next);
+                break;
+
+            case OUTPUT_NDJSON: // Only print records from answer section that match the query name (in ndjson)
+
+                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
+                {
+                    fprintf(context.outfile,
+                            "{\"query_name\":\"%s\",\"query_type\":\"%s\",",
+                            dns_name2str(&packet.head.question.name),
+                            dns_record_type2str((dns_record_type) packet.head.question.type));
+
+                    json_escape(json_buffer, dns_raw_record_data2str(&rec, offset, offset + short_len), sizeof(json_buffer));
+
+                    fprintf(context.outfile,
+                            "\"resp_name\":\"%s\",\"resp_type\":\"%s\",\"data\":\"%s\"}\n",
+                            dns_name2str(&rec.name),
+                            dns_record_type2str((dns_record_type) rec.type),
+                            json_buffer);
+                }
+
                 break;
 
             case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
@@ -1828,6 +1850,10 @@ int parse_cmd(int argc, char **argv)
             {
                 case 'B':
                     context.cmd_args.output = OUTPUT_BINARY;
+                    break;
+
+                case 'J':
+                    context.cmd_args.output = OUTPUT_NDJSON;
                     break;
 
                 case 'S':
