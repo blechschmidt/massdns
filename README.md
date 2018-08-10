@@ -20,6 +20,7 @@ the default values of the `-s` and `-i` parameters have been changed. The reposi
 
 ## Compilation
 Clone the git repository and `cd` into the project root folder. Then run `make` to build from source.
+If you are not on Linux, run `make nolinux`. On Windows, the `Cygwin` packages `gcc-core`, `git` and `make` are required.
 
 ## Usage
 ```
