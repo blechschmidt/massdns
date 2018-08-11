@@ -1,13 +1,13 @@
 PREFIX=/usr/local
 
 all:
-	mkdir -p bin
+	mkdir -p {bin,tmp}
 	$(CC) $(CFLAGS) -O3 -std=c11 -DHAVE_EPOLL -DHAVE_SYSINFO -Wall -fstack-protector-strong main.c -o bin/massdns
 debug:
-	mkdir -p bin
+	mkdir -p {bin,tmp}
 	$(CC) $(CFLAGS) -O0 -std=c11 -DHAVE_EPOLL -DHAVE_SYSINFO -Wall -g -DDEBUG main.c -o bin/massdns
 nolinux:
-	mkdir -p bin
+	mkdir -p {bin,tmp}
 	$(CC) $(CFLAGS) -O3 -std=c11 -Wall -fstack-protector-strong main.c -o bin/massdns
 install:
 	test -d $(PREFIX) || mkdir $(PREFIX)
