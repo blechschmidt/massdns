@@ -26,7 +26,9 @@ If you are not on Linux, run `make nolinux`. On Windows, the `Cygwin` packages `
 ```
 Usage: ./bin/massdns [options] [domainlist]
   -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
+      --busy-poll        Use busy-wait polling instead of epoll.
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
+      --drop-group       Group to drop privileges to when running as root. (Default: nogroup)
       --drop-user        User to drop privileges to when running as root. (Default: nobody)
       --flush            Flush the output file whenever a response was received.
   -h  --help             Show this help.
@@ -54,6 +56,7 @@ Output flags:
   S - simple text output
   F - full text output
   B - binary output
+  J - ndjson output
 ```
 This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.
 
