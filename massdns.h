@@ -108,7 +108,8 @@ typedef enum
     OUTPUT_TEXT_FULL,
     OUTPUT_TEXT_SIMPLE,
     OUTPUT_BINARY,
-    OUTPUT_NDJSON
+    OUTPUT_NDJSON,
+    OUTPUT_CSV_SIMPLE
 } output_t;
 
 const char *default_interfaces[] = {""};
@@ -173,6 +174,7 @@ typedef struct
         size_t num_processes;
         size_t socket_count;
         bool busypoll;
+        bool write_exhausted_tries;
     } cmd_args;
 
     struct

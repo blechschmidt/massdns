@@ -57,6 +57,8 @@ Output flags:
   F - full text output
   B - binary output
   J - ndjson output
+  C - simple csv output, format: domain;type;@resolver;statuscode;answers as json array
+
 ```
 This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.
 
