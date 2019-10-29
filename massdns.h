@@ -84,6 +84,8 @@ typedef struct
     uint16_t transaction;
     void **ring_entry; // pointer to the entry within the timed ring for entry invalidation
     resolver_t *resolver;
+    char **nameservers;
+    size_t nameserver_index;
     lookup_key_t *key;
     socket_info_t *socket;
 } lookup_t;
