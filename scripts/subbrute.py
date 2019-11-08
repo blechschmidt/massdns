@@ -8,4 +8,4 @@ if len(sys.argv) < 3:
 for lines in open(sys.argv[1]):
 	for arg in sys.argv[2:]:
 		if lines.strip() != "":
-			print(lines.strip() + "." + arg)
+			print(lines.strip() + "." + arg + "\n")
