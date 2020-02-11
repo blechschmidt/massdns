@@ -111,6 +111,11 @@ typedef enum
     OUTPUT_NDJSON
 } output_t;
 
+typedef struct {
+    const char *name;
+    const char *status_fmt;
+} status_format_map_t;
+
 const char *default_interfaces[] = {""};
 
 typedef struct
@@ -129,7 +134,6 @@ typedef struct
     struct
     {
         bool sections[4];
-
         bool match_name;
         bool ttl;
         bool separate_queries;
@@ -188,7 +192,7 @@ typedef struct
     size_t finished;
     pid_t *pids;
     bool *done;
-
+    const char *status_fmt;
     FILE* outfile;
     FILE* logfile;
     FILE* domainfile;
