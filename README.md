@@ -24,7 +24,7 @@ If you are not on Linux, run `make nolinux`. On Windows, the `Cygwin` packages `
 
 ## Usage
 ```
-Usage: bin/massdns [options] [domainlist]
+Usage: ./bin/massdns [options] [domainlist]
   -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
       --busy-poll        Use busy-wait polling instead of epoll.
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
