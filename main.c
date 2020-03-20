@@ -1822,7 +1822,7 @@ int parse_cmd(int argc, char **argv)
                 }
             }
         }
-        else if (strcmp(argv[i], "--types") == 0 || strcmp(argv[i], "-t") == 0)
+        else if (strcmp(argv[i], "--types") == 0 || strcmp(argv[i], "--type") == 0 || strcmp(argv[i], "-t") == 0)
         {
             expect_arg(i);
             if (context.cmd_args.record_type != DNS_REC_INVALID)
