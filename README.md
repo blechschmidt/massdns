@@ -24,7 +24,7 @@ If you are not on Linux, run `make nolinux`. On Windows, the `Cygwin` packages `
 
 ## Usage
 ```
-Usage: ./bin/massdns [options] [domainlist]
+Usage: bin/massdns [options] [domainlist]
   -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
       --busy-poll        Use busy-wait polling instead of epoll.
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
@@ -46,6 +46,7 @@ Usage: ./bin/massdns [options] [domainlist]
       --root             Do not drop privileges when running as root. Not recommended.
   -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)
       --sndbuf           Size of the send buffer in bytes.
+      --status-format    Format for real-time status updates, json or ansi (Default: ansi)
       --sticky           Do not switch the resolver when retrying.
       --socket-count     Socket count per process. (Default: 1)
   -t  --type             Record type to be resolved. (Default: A)
@@ -57,7 +58,20 @@ Output flags:
   F - full text output
   B - binary output
   J - ndjson output
+
+Advanced flags for the simple output mode:
+  d - Include records from the additional section.
+  i - Indent any reply record.
+  l - Separate replies using a line feed.
+  m - Only output reply records that match the question name.
+  n - Include records from the answer section.
+  q - Print the question.
+  r - Prepend resolver IP address, Unix timestamp and return code to the question line.
+  s - Separate packet sections using a line feed.
+  t - Include TTL and record class within the output.
+  u - Include records from the authority section.
 ```
+
 This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.
 
 ### Example
