@@ -835,6 +835,11 @@ void can_send()
     {
         if(!next_query(&qname))
         {
+            if(hashmapSize(context.map) <= 0)
+            {
+                done();
+                return;
+            }
             context.state = STATE_COOLDOWN; // We will not create any new queries
             break;
         }
