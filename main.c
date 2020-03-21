@@ -1067,9 +1067,10 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     json_escape(json_buffer, dns_raw_record_data2str(&rec, offset, offset + short_len), sizeof(json_buffer));
 
                     fprintf(context.outfile,
-                            "\"resp_name\":\"%s\",\"resp_type\":\"%s\",\"data\":\"%s\"}\n",
+                            "\"resp_name\":\"%s\",\"resp_type\":\"%s\",\"resp_ttl\":\"%d\",\"data\":\"%s\"}\n",
                             dns_name2str(&rec.name),
                             dns_record_type2str((dns_record_type) rec.type),
+                            rec.ttl,
                             json_buffer);
                 }
 
