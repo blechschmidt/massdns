@@ -8,9 +8,6 @@ names in the order of millions or even billions. Without special configuration, 
 ## Major changes
 **The NDJSON output format has changed in order to provide more detailed information and allow better filtering.**
 
-Also note that the command line interface has changed slightly due to criticism of the output complexity. Additionally,
-the default values of the `-s` and `-i` parameters have been changed. The repository structure has been changed as well.
-
 ## Contributors
 * [Quirin Scheitle](https://github.com/quirins), [Technical University of Munich](https://www.net.in.tum.de/members/scheitle/)
 
