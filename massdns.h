@@ -141,6 +141,7 @@ typedef struct
         bool include_meta;
         bool indent_sections;
         bool print_question;
+        bool write_exhausted_tries;
     } format;
 
     struct cmd_args

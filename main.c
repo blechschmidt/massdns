@@ -31,6 +31,8 @@
 #include <net/if.h>
 #endif
 
+static char json_buffer[5 * 0xFFFF];
+
 void print_help()
 {
     fprintf(stderr, ""
@@ -914,6 +916,16 @@ bool is_unacceptable(dns_pkt_t *packet)
     return context.cmd_args.retry_codes[packet->head.header.rcode];
 }
 
+void write_exhausted_tries(lookup_t *lookup, char *status)
+{
+    if(context.cmd_args.output == OUTPUT_NDJSON && context.format.write_exhausted_tries) {
+        json_escape(json_buffer, sizeof(json_buffer), lookup->key->name.name, lookup->key->name.length);
+        fprintf(context.outfile,
+                "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"error\":\"%s\"}\n", json_buffer,
+                dns_record_type2str(lookup->key->type), "IN", status);
+    }
+}
+
 void lookup_done(lookup_t *lookup)
 {
     context.stats.finished++;
@@ -963,6 +975,7 @@ void ring_timeout(void *param)
     lookup_t *lookup = param;
     if(!retry(lookup))
     {
+        write_exhausted_tries(lookup, "TIMEOUT");
         lookup_done(lookup);
     }
 }
@@ -973,7 +986,6 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     static uint8_t *parse_offset;
     static lookup_t *lookup;
     static resolver_t* resolver;
-    static char json_buffer[5 * 0xFFFF];
 
     context.stats.current_rate++;
     context.stats.numreplies++;
@@ -1019,6 +1031,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         // We may have tried to many times already.
         if(!retry(lookup))
         {
+            write_exhausted_tries(lookup, "MAXRETRIES");
             // If this is the case, we will not try again.
             lookup_done(lookup);
         }
@@ -1983,6 +1996,19 @@ int parse_cmd(int argc, char **argv)
 
                 case 'J':
                     context.cmd_args.output = OUTPUT_NDJSON;
+
+                    for(char *output_option = argv[i] + 1; *output_option != 0; output_option++)
+                    {
+                        switch(*output_option)
+                        {
+                            case 'e':
+                                context.format.write_exhausted_tries = true;
+                                break;
+                            default:
+                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                clean_exit(EXIT_FAILURE);
+                        }
+                    }
                     break;
 
                 case 'S':
