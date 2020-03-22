@@ -973,7 +973,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     static uint8_t *parse_offset;
     static lookup_t *lookup;
     static resolver_t* resolver;
-    static char json_buffer[0xFFFF];
+    static char json_buffer[5 * 0xFFFF];
 
     context.stats.current_rate++;
     context.stats.numreplies++;
@@ -1037,6 +1037,8 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         dns_record_t rec;
         size_t non_add_count = packet.head.header.ans_count + packet.head.header.auth_count;
         dns_section_t section = DNS_SECTION_ANSWER;
+        size_t section_index = 0;
+        bool section_emitted = false;
 
         switch(context.cmd_args.output)
         {
@@ -1056,23 +1058,51 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 break;
 
             case OUTPUT_NDJSON: // Only print records from answer section that match the query name (in ndjson)
-
-                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
+                json_escape(json_buffer, sizeof(json_buffer), packet.head.question.name.name, packet.head.question.name.length);
+                fprintf(context.outfile,
+                        "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\",\"data\":{",
+                        json_buffer,
+                        dns_record_type2str((dns_record_type) packet.head.question.type),
+                        dns_class2str((dns_class) packet.head.question.class),
+                        dns_rcode2str((dns_rcode) packet.head.header.rcode));
+                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++, section_index++)
                 {
-                    fprintf(context.outfile,
-                            "{\"query_name\":\"%s\",\"query_type\":\"%s\",",
-                            dns_name2str(&packet.head.question.name),
-                            dns_record_type2str((dns_record_type) packet.head.question.type));
+                    if(section == DNS_SECTION_ANSWER && section_index >= packet.head.header.ans_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section == DNS_SECTION_AUTHORITY && section_index >= packet.head.header.auth_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section == DNS_SECTION_ADDITIONAL && section_index >= packet.head.header.add_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section_index == 0) {
+                        fprintf(context.outfile, "%s\"%s\":[", section_emitted ? "]," : "",
+                                dns_section2str_lower_plural(section));
+                    }
+                    else
+                    {
+                        fputs(",", context.outfile);
+                    }
+                    json_escape(json_buffer, sizeof(json_buffer), rec.name.name, rec.name.length);
 
-                    json_escape(json_buffer, dns_raw_record_data2str(&rec, offset, offset + short_len), sizeof(json_buffer));
-
                     fprintf(context.outfile,
-                            "\"resp_name\":\"%s\",\"resp_type\":\"%s\",\"resp_ttl\":%" PRIu32 ",\"data\":\"%s\"}\n",
-                            dns_name2str(&rec.name),
-                            dns_record_type2str((dns_record_type) rec.type),
+                            "{\"ttl\":%" PRIu32 ",\"type\":\"%s\",\"class\":\"%s\",\"name\":\"%s\",\"data\":\"",
                             rec.ttl,
+                            dns_record_type2str((dns_record_type) rec.type),
+                            dns_class2str((dns_class) rec.class),
                             json_buffer);
+                    section_emitted = true;
+                    json_escape_str(json_buffer, sizeof(json_buffer),
+                                    dns_raw_record_data2str(&rec, offset, offset + short_len));
+                    fputs(json_buffer, context.outfile);
+                    fprintf(context.outfile, "\"}");
                 }
+                fprintf(context.outfile, "%s},\"resolver\":\"%s\"}\n", section_emitted ? "]" : "",
+                        sockaddr2str(recvaddr));
 
                 break;
 

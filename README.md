@@ -1,4 +1,4 @@
-# MassDNS 0.3 (experimental)
+# MassDNS 0.3
 ## A high-performance DNS stub resolver
 
 MassDNS is a simple high-performance DNS stub resolver targetting those who seek to resolve a massive amount of domain
@@ -6,11 +6,7 @@ names in the order of millions or even billions. Without special configuration, 
 350,000 names per second using publicly available resolvers.
 
 ## Major changes
-This version of MassDNS is currently experimental. In order to speed up the resolving process, the `ldns` dependency has
-been replaced by a custom stack-based DNS implementation (which currently only supports the text representation of the
-most common DNS records). Furthermore, epoll has been introduced in order to lighten CPU usage when operating with a low
-concurrency which may have broken compatibility with some platforms. In case of bugs, please create an issue and
-[switch to the more mature version 0.2](https://github.com/blechschmidt/massdns/tree/v0.2).
+**The NDJSON output format has changed in order to provide more detailed information and allow better filtering.**
 
 Also note that the command line interface has changed slightly due to criticism of the output complexity. Additionally,
 the default values of the `-s` and `-i` parameters have been changed. The repository structure has been changed as well.

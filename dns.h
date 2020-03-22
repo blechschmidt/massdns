@@ -940,6 +940,7 @@ ssize_t dns_str2namebuf(const char *name, uint8_t *buffer)
             *lenptr = label_len;
             if (total_len == 1)
             {
+                total_len--;
                 break;
             }
             if (*name == 0)
@@ -1450,6 +1451,22 @@ char *dns_section2str(dns_section_t section)
             return "QUESTION";
     }
     return "UNKNOWN";
+}
+
+char *dns_section2str_lower_plural(dns_section_t section)
+{
+    switch(section)
+    {
+        case DNS_SECTION_ANSWER:
+            return "answers";
+        case DNS_SECTION_ADDITIONAL:
+            return "additionals";
+        case DNS_SECTION_AUTHORITY:
+            return "authorities";
+        case DNS_SECTION_QUESTION:
+            return "questions";
+    }
+    return "unknowns";
 }
 
 bool dns_in_zone(dns_name_t *name, dns_name_t *zone)
