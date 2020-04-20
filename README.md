@@ -59,7 +59,7 @@ Advanced flags for the simple output mode:
   m - Only output reply records that match the question name.
   n - Include records from the answer section.
   q - Print the question.
-  r - Prepend resolver IP address, Unix timestamp and return code to the question line.
+  r - Use together with q flag, prepend resolver IP address, Unix timestamp and return code to the question line.
   s - Separate packet sections using a line feed.
   t - Include TTL and record class within the output.
   u - Include records from the authority section.
