@@ -1,19 +1,12 @@
-# MassDNS 0.3 (experimental)
+# MassDNS 0.3
 ## A high-performance DNS stub resolver
 
-MassDNS is a simple high-performance DNS stub resolver targetting those who seek to resolve a massive amount of domain
+MassDNS is a simple high-performance DNS stub resolver targeting those who seek to resolve a massive amount of domain
 names in the order of millions or even billions. Without special configuration, MassDNS is capable of resolving over
 350,000 names per second using publicly available resolvers.
 
 ## Major changes
-This version of MassDNS is currently experimental. In order to speed up the resolving process, the `ldns` dependency has
-been replaced by a custom stack-based DNS implementation (which currently only supports the text representation of the
-most common DNS records). Furthermore, epoll has been introduced in order to lighten CPU usage when operating with a low
-concurrency which may have broken compatibility with some platforms. In case of bugs, please create an issue and
-[switch to the more mature version 0.2](https://github.com/blechschmidt/massdns/tree/v0.2).
-
-Also note that the command line interface has changed slightly due to criticism of the output complexity. Additionally,
-the default values of the `-s` and `-i` parameters have been changed. The repository structure has been changed as well.
+**The NDJSON output format has changed in order to provide more detailed information and allow better filtering.**
 
 ## Contributors
 * [Quirin Scheitle](https://github.com/quirins), [Technical University of Munich](https://www.net.in.tum.de/members/scheitle/)
@@ -46,6 +39,7 @@ Usage: ./bin/massdns [options] [domainlist]
       --root             Do not drop privileges when running as root. Not recommended.
   -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)
       --sndbuf           Size of the send buffer in bytes.
+      --status-format    Format for real-time status updates, json or ansi (Default: ansi)
       --sticky           Do not switch the resolver when retrying.
       --socket-count     Socket count per process. (Default: 1)
   -t  --type             Record type to be resolved. (Default: A)
@@ -57,7 +51,20 @@ Output flags:
   F - full text output
   B - binary output
   J - ndjson output
+
+Advanced flags for the simple output mode:
+  d - Include records from the additional section.
+  i - Indent any reply record.
+  l - Separate replies using a line feed.
+  m - Only output reply records that match the question name.
+  n - Include records from the answer section.
+  q - Print the question.
+  r - Prepend resolver IP address, Unix timestamp and return code to the question line.
+  s - Separate packet sections using a line feed.
+  t - Include TTL and record class within the output.
+  u - Include records from the authority section.
 ```
+
 This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.
 
 ### Example

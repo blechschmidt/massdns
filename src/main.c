@@ -31,6 +31,8 @@
 #include <net/if.h>
 #endif
 
+static char json_buffer[5 * 0xFFFF];
+
 void print_help()
 {
     fprintf(stderr, ""
@@ -58,6 +60,7 @@ void print_help()
                     "      --root             Do not drop privileges when running as root. Not recommended.\n"
                     "  -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)\n"
                     "      --sndbuf           Size of the send buffer in bytes.\n"
+                    "      --status-format    Format for real-time status updates, json or ansi (Default: ansi)\n"
                     "      --sticky           Do not switch the resolver when retrying.\n"
                     "      --socket-count     Socket count per process. (Default: 1)\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
@@ -87,6 +90,75 @@ void print_help()
                     context.cmd_args.argv[0] ? context.cmd_args.argv[0] : "massdns"
     );
 }
+
+
+/* The default real-time status output, human reeadable, very granular stats */
+static const char* stats_fmt_ansi = "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
+        "Processed queries: %zu\n"
+        "Received packets: %zu\n"
+        "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
+        "Current incoming rate: %zu pps, average: %zu pps\n"
+        "Current success rate: %zu pps, average: %zu pps\n"
+        "Finished total: %zu, success: %zu (%.2f%%)\n"
+        "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
+        "Failures: %s\n"
+        "Response: | Success:               | Total:\n"
+        "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+        "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+        "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+        "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
+        "FORMERR:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n";
+
+/* Optional real-time status output, all stats on a single line as valid JSON */
+static const char* stats_fmt_json = 
+    "{"
+        "\"processed_queries\": %zu,"
+        "\"received_packets\": %zu, "
+        "\"progress\":"
+        "{"
+            "\"percent\": \"%.2f%%\"" ","
+            "\"eta\":" "{"
+                "\"hours\": %lld, \"minutes\": %lld, \"seconds\": %lld, \"total_hours\": %lld, \"total_minutes\": %lld, \"total_seconds\": %lld"
+            "}"
+        "},"
+        "\"incoming_pps\": %zu, "
+        "\"average_incoming_pps\": %zu, "
+        "\"success_rate_pps\": %zu, \"average_success_rate_pps\": %zu, "
+        "\"finished_total\": %zu, "
+        "\"success_total\": %zu, "
+        "\"success_total_percent\": \"%.2f%%\", "
+        "\"mismatched_domains\": %zu,"
+        "\"mismatched_domains_pct\": \"%.2f%%\","
+        "\"IDs\": %zu, \"IDs pct\": \"%.2f%%\","
+        "\"failures\": \"%s\","
+        "\"response\": {"
+        "\"OK\": {"
+            "\"success_number\": %12zu,"
+            "\"success_pct\": \"%6.2f%%\","
+            "\"total_number\": %12zu,"
+            "\"total_pct\": \"%6.2f%%\"},"
+        "\"NXDOMAIN\": { "
+            "\"success_number\": %12zu,"
+            "\"success_pct\": \"%6.2f%%\","
+            "\"total_number\": %12zu,"
+            "\"total_pct\": \"%6.2f%%\"},"
+        "\"SERVFAIL\": {"
+            "\"success_number\": %zu,"
+            "\"success_pct\": \"%6.2f%%\","
+            "\"total_number\": %zu, "
+            "\"total_pct\": \"%6.2f%%\"},"             
+        "\"REFUSED\": { "
+            "\"success_number\": %12zu,"
+            "\"success_pct\": \"%6.2f%%\","
+            "\"total_number\": %zu,"
+            "\"total_pct\": \"%6.2f%%\"},"
+        "\"FORMERR\": {"
+            "\"success_number\": %zu,"
+            "\"success_pct\": \"%6.2f%%\","
+            "\"total_number\": %zu,"
+            "\"total_pct\": \"%6.2f%%\"}"
+        "}"
+    "}\n";
 
 void cleanup()
 {
@@ -622,21 +694,6 @@ void check_progress()
     static struct timespec last_time;
     static char timeouts[4096];
     static struct timespec now;
-    static const char* stats_format = "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
-            "Processed queries: %zu\n"
-            "Received packets: %zu\n"
-            "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
-            "Current incoming rate: %zu pps, average: %zu pps\n"
-            "Current success rate: %zu pps, average: %zu pps\n"
-            "Finished total: %zu, success: %zu (%.2f%%)\n"
-            "Mismatched domains: %zu (%.2f%%), IDs: %zu (%.2f%%)\n"
-            "Failures: %s\n"
-            "Response: | Success:               | Total:\n"
-            "OK:       | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-            "NXDOMAIN: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-            "SERVFAIL: | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-            "REFUSED:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n"
-            "FORMERR:  | %12zu (%6.2f%%) | %12zu (%6.2f%%)\n";
 
     clock_gettime(CLOCK_MONOTONIC, &now);
 
@@ -714,7 +771,7 @@ void check_progress()
         }
 
         fprintf(stderr,
-                stats_format,
+                context.status_fmt,
                 context.stats.numdomains,
                 context.stats.numreplies,
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
@@ -731,6 +788,7 @@ void check_progress()
                 rcode_stat(DNS_RCODE_REFUSED),
                 rcode_stat(DNS_RCODE_FORMERR)
         );
+        fflush(stderr);
     }
     else
     {
@@ -781,7 +839,7 @@ void check_progress()
         }
 
         fprintf(stderr,
-                stats_format,
+                context.status_fmt,
                 context.stat_messages[0].numdomains,
                 context.stat_messages[0].numreplies,
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
@@ -835,6 +893,11 @@ void can_send()
     {
         if(!next_query(&qname))
         {
+            if(hashmapSize(context.map) <= 0)
+            {
+                done();
+                return;
+            }
             context.state = STATE_COOLDOWN; // We will not create any new queries
             break;
         }
@@ -851,6 +914,16 @@ void can_send()
 bool is_unacceptable(dns_pkt_t *packet)
 {
     return context.cmd_args.retry_codes[packet->head.header.rcode];
+}
+
+void write_exhausted_tries(lookup_t *lookup, char *status)
+{
+    if(context.cmd_args.output == OUTPUT_NDJSON && context.format.write_exhausted_tries) {
+        json_escape(json_buffer, sizeof(json_buffer), lookup->key->name.name, lookup->key->name.length);
+        fprintf(context.outfile,
+                "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"error\":\"%s\"}\n", json_buffer,
+                dns_record_type2str(lookup->key->type), "IN", status);
+    }
 }
 
 void lookup_done(lookup_t *lookup)
@@ -902,6 +975,7 @@ void ring_timeout(void *param)
     lookup_t *lookup = param;
     if(!retry(lookup))
     {
+        write_exhausted_tries(lookup, "TIMEOUT");
         lookup_done(lookup);
     }
 }
@@ -912,7 +986,6 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     static uint8_t *parse_offset;
     static lookup_t *lookup;
     static resolver_t* resolver;
-    static char json_buffer[0xFFFF];
 
     context.stats.current_rate++;
     context.stats.numreplies++;
@@ -958,6 +1031,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         // We may have tried to many times already.
         if(!retry(lookup))
         {
+            write_exhausted_tries(lookup, "MAXRETRIES");
             // If this is the case, we will not try again.
             lookup_done(lookup);
         }
@@ -976,6 +1050,8 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         dns_record_t rec;
         size_t non_add_count = packet.head.header.ans_count + packet.head.header.auth_count;
         dns_section_t section = DNS_SECTION_ANSWER;
+        size_t section_index = 0;
+        bool section_emitted = false;
 
         switch(context.cmd_args.output)
         {
@@ -995,22 +1071,51 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 break;
 
             case OUTPUT_NDJSON: // Only print records from answer section that match the query name (in ndjson)
-
-                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
+                json_escape(json_buffer, sizeof(json_buffer), packet.head.question.name.name, packet.head.question.name.length);
+                fprintf(context.outfile,
+                        "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\",\"data\":{",
+                        json_buffer,
+                        dns_record_type2str((dns_record_type) packet.head.question.type),
+                        dns_class2str((dns_class) packet.head.question.class),
+                        dns_rcode2str((dns_rcode) packet.head.header.rcode));
+                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++, section_index++)
                 {
-                    fprintf(context.outfile,
-                            "{\"query_name\":\"%s\",\"query_type\":\"%s\",",
-                            dns_name2str(&packet.head.question.name),
-                            dns_record_type2str((dns_record_type) packet.head.question.type));
+                    if(section == DNS_SECTION_ANSWER && section_index >= packet.head.header.ans_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section == DNS_SECTION_AUTHORITY && section_index >= packet.head.header.auth_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section == DNS_SECTION_ADDITIONAL && section_index >= packet.head.header.add_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section_index == 0) {
+                        fprintf(context.outfile, "%s\"%s\":[", section_emitted ? "]," : "",
+                                dns_section2str_lower_plural(section));
+                    }
+                    else
+                    {
+                        fputs(",", context.outfile);
+                    }
+                    json_escape(json_buffer, sizeof(json_buffer), rec.name.name, rec.name.length);
 
-                    json_escape(json_buffer, dns_raw_record_data2str(&rec, offset, offset + short_len), sizeof(json_buffer));
-
                     fprintf(context.outfile,
-                            "\"resp_name\":\"%s\",\"resp_type\":\"%s\",\"data\":\"%s\"}\n",
-                            dns_name2str(&rec.name),
+                            "{\"ttl\":%" PRIu32 ",\"type\":\"%s\",\"class\":\"%s\",\"name\":\"%s\",\"data\":\"",
+                            rec.ttl,
                             dns_record_type2str((dns_record_type) rec.type),
+                            dns_class2str((dns_class) rec.class),
                             json_buffer);
+                    section_emitted = true;
+                    json_escape_str(json_buffer, sizeof(json_buffer),
+                                    dns_raw_record_data2str(&rec, offset, offset + short_len));
+                    fputs(json_buffer, context.outfile);
+                    fprintf(context.outfile, "\"}");
                 }
+                fprintf(context.outfile, "%s},\"resolver\":\"%s\"}\n", section_emitted ? "]" : "",
+                        sockaddr2str(recvaddr));
 
                 break;
 
@@ -1690,6 +1795,23 @@ void run()
     }
 }
 
+#define STATUS_FORMAT_OPTIONS 2
+// Set the real-time status format string. The ansi format is used by default
+const char * get_status_format_string(char *arg) {
+    status_format_map_t status_fmt_map[STATUS_FORMAT_OPTIONS] = {
+        { "ansi", stats_fmt_ansi },
+        { "json", stats_fmt_json }};
+    int i;
+
+    for (i=0; i<STATUS_FORMAT_OPTIONS; i++) {
+        if (!strcmp(arg, status_fmt_map[i].name))
+            return status_fmt_map[i].status_fmt;
+    }
+    log_msg("Invalid status format specified.\n");
+    clean_exit(EXIT_FAILURE);
+    return NULL;
+}
+
 void use_stdin()
 {
     if (!context.cmd_args.quiet)
@@ -1728,6 +1850,8 @@ int parse_cmd(int argc, char **argv)
 
     context.format.match_name = true;
     context.format.sections[DNS_SECTION_ANSWER] = true;
+
+    context.status_fmt = stats_fmt_ansi;
 
     context.cmd_args.resolve_count = 50;
     context.cmd_args.hashmap_size = 10000;
@@ -1822,7 +1946,7 @@ int parse_cmd(int argc, char **argv)
                 }
             }
         }
-        else if (strcmp(argv[i], "--types") == 0 || strcmp(argv[i], "-t") == 0)
+        else if (strcmp(argv[i], "--types") == 0 || strcmp(argv[i], "--type") == 0 || strcmp(argv[i], "-t") == 0)
         {
             expect_arg(i);
             if (context.cmd_args.record_type != DNS_REC_INVALID)
@@ -1848,6 +1972,11 @@ int parse_cmd(int argc, char **argv)
             expect_arg(i);
             context.cmd_args.drop_user = argv[++i];
         }
+        else if (strcmp(argv[i], "--status-format") == 0)
+        {
+            expect_arg(i);
+            context.status_fmt = get_status_format_string(argv[++i]);
+        }
         else if (strcmp(argv[i], "--root") == 0)
         {
             context.cmd_args.root = true;
@@ -1867,6 +1996,19 @@ int parse_cmd(int argc, char **argv)
 
                 case 'J':
                     context.cmd_args.output = OUTPUT_NDJSON;
+
+                    for(char *output_option = argv[i] + 1; *output_option != 0; output_option++)
+                    {
+                        switch(*output_option)
+                        {
+                            case 'e':
+                                context.format.write_exhausted_tries = true;
+                                break;
+                            default:
+                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                clean_exit(EXIT_FAILURE);
+                        }
+                    }
                     break;
 
                 case 'S':
