@@ -166,6 +166,7 @@ int get_iface_hw_addr(char *iface, uint8_t *hw_mac)
     }
     bzero(&buffer, sizeof(buffer));
     strncpy(buffer.ifr_name, iface, IFNAMSIZ);
+    buffer.ifr_name[sizeof(buffer.ifr_name) -1] = '\0';
     ioctl(s, SIOCGIFHWADDR, &buffer);
     close(s);
     memcpy(hw_mac, buffer.ifr_hwaddr.sa_data, 6);
