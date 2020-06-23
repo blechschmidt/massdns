@@ -166,6 +166,7 @@ typedef struct
         output_t output;
         bool retry_codes[0xFFFF]; // Fast lookup map for DNS reply codes that are unacceptable and require a retry
         bool retry_codes_set;
+        bool ignore_codes[0xFFFF];
         single_list_t bind_addrs4;
         single_list_t bind_addrs6;
         bool sticky;

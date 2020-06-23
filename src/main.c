@@ -46,6 +46,7 @@ void print_help()
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
+                    "      --ignore           Do not output packets with the specified response code.\n"
                     "  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same\n"
                     "                         domain. (Default: 500)\n"
                     "  -l  --error-log        Error log file path. (Default: /dev/stderr)\n"
@@ -1043,6 +1044,13 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         context.stats.final_rcodes[packet.head.header.rcode]++;
         context.stats.success_rate++;
 
+        // Ignore packet as specified by the user
+        if(context.cmd_args.ignore_codes[packet.head.header.rcode])
+        {
+            lookup_done(lookup);
+            return;
+        }
+
         // Print packet
         time_t now = time(NULL);
         uint16_t short_len = (uint16_t) len;
@@ -1910,6 +1918,19 @@ int parse_cmd(int argc, char **argv)
             else
             {
                 log_msg("Invalid retry code: %s.\n", argv[i]);
+            }
+        }
+        else if(strcmp(argv[i], "--ignore") == 0)
+        {
+            expect_arg(i);
+            dns_rcode rcode;
+            if(dns_str2rcode(argv[++i], &rcode))
+            {
+                context.cmd_args.ignore_codes[rcode] = true;
+            }
+            else
+            {
+                log_msg("Invalid ignore code: %s.\n", argv[i]);
             }
         }
         else if (strcmp(argv[i], "--bindto") == 0 || strcmp(argv[i], "-b") == 0)

@@ -25,6 +25,7 @@ Usage: ./bin/massdns [options] [domainlist]
       --drop-user        User to drop privileges to when running as root. (Default: nobody)
       --flush            Flush the output file whenever a response was received.
   -h  --help             Show this help.
+      --ignore           Do not output packets with the specified response code.
   -i  --interval         Interval in milliseconds to wait between multiple resolves of the same
                          domain. (Default: 500)
   -l  --error-log        Error log file path. (Default: /dev/stderr)
