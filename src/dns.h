@@ -1270,7 +1270,7 @@ bool dns_print_readable(char **buf, size_t buflen, const uint8_t *source, size_t
             }
             *((*buf)++) = '\\';
             *((*buf)++) = 'x';
-            char hex1 = (char)((source[i] >> 8) & 0xF);
+            char hex1 = (char)((source[i] >> 4) & 0xF);
             char hex2 = (char)(source[i] & 0xF);
             *((*buf)++) = (char)(hex1 + (hex1 < 10 ? '0' : ('a' - 10)));
             *((*buf)++) = (char)(hex2 + (hex2 < 10 ? '0' : ('a' - 10)));
