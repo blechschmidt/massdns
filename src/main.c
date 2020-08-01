@@ -84,7 +84,7 @@ void print_help()
                     "  m - Only output reply records that match the question name.\n"
                     "  n - Include records from the answer section.\n"
                     "  q - Print the question.\n"
-                    "  r - Prepend resolver IP address, Unix timestamp and return code to the question line.\n"
+                    "  r - Print the question with resolver IP address, Unix timestamp and return code prepended.\n"
                     "  s - Separate packet sections using a line feed.\n"
                     "  t - Include TTL and record class within the output.\n"
                     "  u - Include records from the authority section.\n",
@@ -2072,6 +2072,7 @@ int parse_cmd(int argc, char **argv)
                                 context.format.print_question = true;
                                 break;
                             case 'r':
+                                context.format.print_question = true;
                                 context.format.include_meta = true;
                                 break;
                             default:
