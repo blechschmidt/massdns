@@ -44,6 +44,7 @@ void print_help()
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-group       Group to drop privileges to when running as root. (Default: nogroup)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
+                    "      --filter           Only output packets with the specified response code.\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
                     "      --ignore           Do not output packets with the specified response code.\n"
@@ -1045,7 +1046,11 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         context.stats.success_rate++;
 
         // Ignore packet as specified by the user
-        if(context.cmd_args.ignore_codes[packet.head.header.rcode])
+        if(context.cmd_args.filter_mode != FILTER_DISABLED &&
+                ((context.cmd_args.filter_mode == FILTER_NEGATIVE
+                    && context.cmd_args.filter_codes[packet.head.header.rcode])
+                || (context.cmd_args.filter_mode == FILTER_POSITIVE
+                    && !context.cmd_args.filter_codes[packet.head.header.rcode])))
         {
             lookup_done(lookup);
             return;
@@ -1918,19 +1923,29 @@ int parse_cmd(int argc, char **argv)
             else
             {
                 log_msg("Invalid retry code: %s.\n", argv[i]);
+                clean_exit(EXIT_FAILURE);
             }
         }
-        else if(strcmp(argv[i], "--ignore") == 0)
+        else if(strcmp(argv[i], "--ignore") == 0 || strcmp(argv[i], "--filter") == 0)
         {
             expect_arg(i);
             dns_rcode rcode;
+
+            filter_mode_t filter_mode = strcmp(argv[i], "--ignore") == 0 ? FILTER_NEGATIVE : FILTER_POSITIVE;
+            if(context.cmd_args.filter_mode != filter_mode && context.cmd_args.filter_mode != FILTER_DISABLED) {
+                log_msg("Cannot combine --filter and --ignore.\n");
+                clean_exit(EXIT_FAILURE);
+            }
+
             if(dns_str2rcode(argv[++i], &rcode))
             {
-                context.cmd_args.ignore_codes[rcode] = true;
+                context.cmd_args.filter_mode = filter_mode;
+                context.cmd_args.filter_codes[rcode] = true;
             }
             else
             {
-                log_msg("Invalid ignore code: %s.\n", argv[i]);
+                log_msg("Invalid filter/ignore code: %s.\n", argv[i]);
+                clean_exit(EXIT_FAILURE);
             }
         }
         else if (strcmp(argv[i], "--bindto") == 0 || strcmp(argv[i], "-b") == 0)
