@@ -543,12 +543,6 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     lookup_entry_t *entry = ((lookup_entry_t**)context.lookup_pool.data)[--context.lookup_pool.len];
     lookup_key_t *key = &entry->key;
 
-    /*key->name.length = (uint8_t)string_copy((char*)key->name.name, qname, sizeof(key->name.name));
-    if(key->name.name[key->name.length - 1] != '.')
-    {
-        key->name.name[key->name.length] = '.';
-        key->name.name[++key->name.length] = 0;
-    }*/
     ssize_t name_length = dns_str2namebuf(qname, key->name.name);
     if(name_length < 0)
     {
