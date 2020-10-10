@@ -543,11 +543,21 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     lookup_entry_t *entry = ((lookup_entry_t**)context.lookup_pool.data)[--context.lookup_pool.len];
     lookup_key_t *key = &entry->key;
 
-    key->name.length = (uint8_t)string_copy((char*)key->name.name, qname, sizeof(key->name.name));
+    /*key->name.length = (uint8_t)string_copy((char*)key->name.name, qname, sizeof(key->name.name));
     if(key->name.name[key->name.length - 1] != '.')
     {
         key->name.name[key->name.length] = '.';
         key->name.name[++key->name.length] = 0;
+    }*/
+    ssize_t name_length = dns_str2namebuf(qname, key->name.name);
+    if(name_length < 0)
+    {
+        key->name.length = 1;
+        key->name.name[0] = 0;
+    }
+    else
+    {
+        key->name.length = name_length;
     }
 
     key->type = type;
@@ -620,7 +630,7 @@ void send_query(lookup_t *lookup)
         lookup->socket = (socket_info_t *) interfaces->data + socket_index;
     }
 
-    ssize_t result = dns_question_create(query_buffer, (char*)lookup->key->name.name, lookup->key->type,
+    ssize_t result = dns_question_create_from_name(query_buffer, &lookup->key->name, lookup->key->type,
                                                    lookup->transaction);
     if (result < DNS_PACKET_MINIMUM_SIZE)
     {
@@ -1084,7 +1094,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 break;
 
             case OUTPUT_NDJSON: // Only print records from answer section that match the query name (in ndjson)
-                json_escape(json_buffer, sizeof(json_buffer), packet.head.question.name.name, packet.head.question.name.length);
+                json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
                 fprintf(context.outfile,
                         "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\",\"data\":{",
                         json_buffer,
@@ -1113,7 +1123,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     {
                         fputs(",", context.outfile);
                     }
-                    json_escape(json_buffer, sizeof(json_buffer), rec.name.name, rec.name.length);
+                    json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
 
                     fprintf(context.outfile,
                             "{\"ttl\":%" PRIu32 ",\"type\":\"%s\",\"class\":\"%s\",\"name\":\"%s\",\"data\":\"",

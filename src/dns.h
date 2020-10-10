@@ -71,6 +71,7 @@ dns_record_type dns_str_to_record_type(const char *str)
 {
     // Performance is important here because we may want to use this when reading
     // large numbers of DNS queries from a file.
+    long int code;
 
     switch (tolower(str[0]))
     {
@@ -396,7 +397,13 @@ dns_record_type dns_str_to_record_type(const char *str)
         case '7':
         case '8':
         case '9':
-            return (dns_record_type)atoi(str);
+            errno = 0;
+            code = strtol(str, NULL, 10);
+            if(code < 0 || code > 0xFFFF || errno != 0)
+            {
+                return DNS_REC_INVALID;
+            }
+            return (dns_record_type)code;
         default:
             return DNS_REC_INVALID;
     }
@@ -410,8 +417,6 @@ typedef enum
     DNS_CLS_QCLASS_NONE = 254,
     DNS_CLS_QCLASS_ANY = 255
 } dns_class;
-
-#define DNS_RCODE_BADSIG DNS_RCODE_BADVERS
 
 typedef enum
 {
@@ -646,77 +651,79 @@ static inline bool is_valid_label_char(int c)
     return isalnum(c) || c == '-' || c == '_';
 }
 
+/**
+ * Parse a DNS name from a DNS packet into a buffer.
+ *
+ * @param begin A pointer to the first byte of the DNS packet.
+ * @param buf A pointer to the first byte of the name to be parsed.
+ * @param end A pointer to the first byte succeeding the DNS packet.
+ * @param name The buffer which the name is read into.
+ * @param len Pointer to an integer which is filled with the total length of the name.
+ * @param next Will be set to the byte succeeding the first DNS pointer if applicable or the entire DNS name otherwise.
+ * @return Whether the name was parsed successfully.
+ */
 static bool parse_name(uint8_t *begin, uint8_t *buf, const uint8_t *end, uint8_t *name, uint8_t *len, uint8_t **next)
 {
-    static uint8_t first;
-    static int label_type;
-    static int label_len;
-    static int name_len;
-    static uint8_t *pointer;
+    int label_type;
+    int label_len;
+    int name_len = 0;
+    uint8_t *pointer = NULL;
 
-    label_len = 0;
-    pointer = NULL;
-    name_len = 0;
     while (true)
     {
         if (buf >= end)
         {
             return false;
         }
-        first = *buf;
-        label_type = (first & 0xC0);
+        label_type = (*buf & 0xC0);
         if (label_type == 0xC0) // Compressed
         {
+            if(end - buf < 2)
+            {
+                return false;
+            }
+
+            // Set the next parameter if it has not been set yet
             if (next && !pointer)
             {
                 *next = buf + 2;
             }
+
+            // Parse pointer address
             pointer = begin + (htons(*((uint16_t *) buf)) & 0x3FFF);
+
+            // Address must be smaller than the current position
             if (pointer >= buf)
             {
                 return false;
             }
+
+            // Continue parsing at the pointer location.
             buf = pointer;
         }
         else if (label_type == 0x00) // Uncompressed
         {
-            label_len = (first & 0x3F);
-            name_len += label_len + 1;
-            if (name_len >= 0xFF)
+            label_len = (*buf & 0x3F) + 1;
+            name_len += label_len;
+            if (name_len >= 0xFF || end - buf < label_len)
             {
                 return false;
             }
-            if (label_len == 0)
+            if (label_len == 1)
             {
-                if (name_len == 1)
-                {
-                    *(name++) = '.';
-                }
                 *name = 0;
                 if (next && !pointer)
                 {
-                    *next = buf + label_len + 1;
+                    *next = buf + 1;
                 }
-                if (name_len <= 1)
-                {
-                    *len = (uint8_t) name_len;
-                }
-                else
-                {
-                    *len = (uint8_t) (name_len - 1);
-                }
+                *len = (uint8_t) name_len;
                 return true;
             }
             else
             {
-                if (buf + label_len + 1 > end)
-                {
-                    return false;
-                }
-                memcpy(name, buf + 1, (size_t)label_len);
-                *(name + label_len) = '.';
-                name += label_len + 1;
-                buf += label_len + 1;
+                memcpy(name, buf, (size_t)label_len);
+                name += label_len;
+                buf += label_len;
             }
         }
         else
@@ -1070,17 +1077,36 @@ bool dns_parse_question(uint8_t *buf, size_t len, dns_head_t *head, uint8_t **bo
     return true;
 }
 
+/**
+ * Check whether two DNS names are equal (case-insensitive).
+ *
+ * @param name1 Valid DNS name 1.
+ * @param name2 Valid DNS name 2.
+ * @return The result of the comparison as a boolean.
+ */
 bool dns_names_eq(dns_name_t *name1, dns_name_t *name2)
 {
     if(name1->length != name2->length)
     {
         return false;
     }
-    for(uint8_t i = 0; i < name1->length; i++)
+    uint_fast8_t label_length_offset = 0;
+    for(uint_fast8_t i = 0; i < name1->length; i++)
     {
-        if(tolower(name1->name[i]) != tolower(name2->name[i]))
+        if (i == label_length_offset)
         {
-            return false;
+            if (name1->name[i] != name2->name[i])
+            {
+                return false;
+            }
+            label_length_offset += name1->name[i];
+        }
+        else
+        {
+            if (tolower(name1->name[i]) != tolower(name2->name[i]))
+            {
+                return false;
+            }
         }
     }
     return true;
@@ -1160,8 +1186,8 @@ bool dns_parse_record(uint8_t *begin, uint8_t *buf, const uint8_t *end, uint8_t 
 
 bool dns_parse_body(uint8_t *buf, uint8_t *begin, const uint8_t *end, dns_pkt_t *packet)
 {
-    static uint8_t *next;
-    static uint16_t i;
+    uint8_t *next;
+    int_fast32_t i;
 
     next = buf;
     for (i = 0; i < min(packet->head.header.ans_count, elements(packet->body.ans) - 1); i++)
@@ -1250,11 +1276,27 @@ bool dns_create_reply(uint8_t *buffer, size_t *len, char *name, dns_record_type 
 bool dns_print_readable(char **buf, size_t buflen, const uint8_t *source, size_t len)
 {
     char *endbuf = *buf + buflen;
+    size_t label_length_offset = 0;
+
     for(size_t i = 0; i < len; i++)
     {
-        if(source[i] >= ' ' && source[i] <= '~' && source[i] != '\\')
+        if(i == label_length_offset)
         {
-            if(*buf >= endbuf - 1)
+            if(endbuf - *buf <= 1)
+            {
+                **buf = 0;
+                return false;
+            }
+            if(i != 0 || len == 1)
+            {
+                *((*buf)++) = '.';
+            }
+            label_length_offset += source[i] + 1;
+            continue;
+        }
+        if(source[i] >= ' ' && source[i] <= '~' && source[i] != '\\' && source[i] != '.')
+        {
+            if(endbuf - *buf <= 1)
             {
                 **buf = 0;
                 return false;
@@ -1449,8 +1491,9 @@ char *dns_section2str(dns_section_t section)
             return "AUTHORITY";
         case DNS_SECTION_QUESTION:
             return "QUESTION";
+        default:
+            return "UNKNOWN";
     }
-    return "UNKNOWN";
 }
 
 char *dns_section2str_lower_plural(dns_section_t section)
@@ -1465,8 +1508,9 @@ char *dns_section2str_lower_plural(dns_section_t section)
             return "authorities";
         case DNS_SECTION_QUESTION:
             return "questions";
+        default:
+            return "unknowns";
     }
-    return "unknowns";
 }
 
 bool dns_in_zone(dns_name_t *name, dns_name_t *zone)
