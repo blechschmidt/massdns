@@ -635,7 +635,7 @@ void send_query(lookup_t *lookup)
                                                    lookup->transaction);
     if (result < DNS_PACKET_MINIMUM_SIZE)
     {
-        log_msg("Failed to create DNS question for query \"%s\".", lookup->key->name.name);
+        log_msg("Failed to create DNS question for query \"%s\".", dns_name2str(&lookup->key->name));
         return;
     }
 
@@ -1308,7 +1308,6 @@ void can_read(socket_info_t *info)
 bool cmp_lookup(void *lookup1, void *lookup2)
 {
     return dns_names_eq(&((lookup_key_t *) lookup1)->name, &((lookup_key_t *) lookup2)->name);
-    //return strcasecmp(((lookup_key_t *) lookup1)->domain,((lookup_key_t *) lookup2)->domain) == 0;
 }
 
 void binfile_write_head()
