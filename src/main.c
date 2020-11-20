@@ -1124,7 +1124,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     {
                         fputs(",", context.outfile);
                     }
-                    json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
+                    json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&rec.name));
 
                     fprintf(context.outfile,
                             "{\"ttl\":%" PRIu32 ",\"type\":\"%s\",\"class\":\"%s\",\"name\":\"%s\",\"data\":\"",
