@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #ifndef MASSRESOLVER_TIMED_RING_H
 #define MASSRESOLVER_TIMED_RING_H
 

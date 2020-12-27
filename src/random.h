@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #ifndef MASSRESOLVER_RANDOM_H
 #define MASSRESOLVER_RANDOM_H
 

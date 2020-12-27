@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 #ifndef MASSRESOLVER_DNS_H
 #define MASSRESOLVER_DNS_H
 

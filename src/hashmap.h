@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #ifndef MASSDNS_HASHMAP_H
 #define MASSDNS_HASHMAP_H
 /*
