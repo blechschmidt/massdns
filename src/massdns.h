@@ -17,7 +17,6 @@
 #endif
 
 #include "list.h"
-#include "module.h"
 #include "net.h"
 #include "hashmap.h"
 #include "dns.h"
@@ -132,12 +131,6 @@ typedef struct
     lookup_entry_t *lookup_space;
     buffer_t lookup_pool;
     Hashmap *resolver_map;
-
-    struct
-    {
-        massdns_module_t handlers[MAXIMUM_MODULE_COUNT]; // we only support up to 255 modules
-        size_t count;
-    } modules;
 
     struct
     {
