@@ -1377,11 +1377,8 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
                 uint8_t length = *(data_ptr++);
                 if (data_ptr + length <= record_end)
                 {
-                    *(ptr++) = '"';
                     dns_print_readable(&ptr, sizeof(buf), data_ptr, length, false);
                     data_ptr += length;
-                    *(ptr++) = '"';
-                    *(ptr++) = ' ';
                 }
                 else
                 {
