@@ -1342,7 +1342,7 @@ void dns_question2str(dns_question_t *question, char *buf, size_t len)
              dns_record_type2str(question->type));
 }
 
-char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end)
+char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end, bool put_quotes)
 {
     static char buf[0xFFFF0];
     static dns_name_t name;
@@ -1377,8 +1377,13 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
                 uint8_t length = *(data_ptr++);
                 if (data_ptr + length <= record_end)
                 {
+                    if (put_quotes) *(ptr++) = '"';
                     dns_print_readable(&ptr, sizeof(buf), data_ptr, length, false);
                     data_ptr += length;
+                    if (put_quotes){
+                        *(ptr++) = '"';
+                        *(ptr++) = ' ';
+                    }
                 }
                 else
                 {
@@ -1566,7 +1571,7 @@ void dns_print_packet(FILE *f, dns_pkt_t *packet, uint8_t *begin, size_t len, ui
                 rec.ttl,
                 dns_class2str((dns_class)rec.class),
                 dns_record_type2str((dns_record_type) rec.type),
-                dns_raw_record_data2str(&rec, begin, begin + len));
+                dns_raw_record_data2str(&rec, begin, begin + len, true));
     }
     fprintf(f, "\n\n");
 }

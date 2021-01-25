@@ -1136,7 +1136,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                             json_buffer);
                     section_emitted = true;
                     json_escape_str(json_buffer, sizeof(json_buffer),
-                                    dns_raw_record_data2str(&rec, offset, offset + short_len));
+                                    dns_raw_record_data2str(&rec, offset, offset + short_len, false));
                     fputs(json_buffer, context.outfile);
                     fprintf(context.outfile, "\"}");
                 }
@@ -1206,7 +1206,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                                 context.format.indent_sections ? "\t" : "",
                                 dns_name2str(&rec.name),
                                 dns_record_type2str((dns_record_type) rec.type),
-                                dns_raw_record_data2str(&rec, offset, offset + short_len));
+                                dns_raw_record_data2str(&rec, offset, offset + short_len, true));
                     }
                     else
                     {
@@ -1218,7 +1218,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                                 dns_class2str((dns_class)rec.class),
                                 rec.ttl,
                                 dns_record_type2str((dns_record_type) rec.type),
-                                dns_raw_record_data2str(&rec, offset, offset + short_len));
+                                dns_raw_record_data2str(&rec, offset, offset + short_len, true));
                     }
                 }
                 if(context.format.separate_queries)
