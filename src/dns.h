@@ -1275,14 +1275,14 @@ bool dns_create_reply(uint8_t *buffer, size_t *len, char *name, dns_record_type 
     return true;
 }
 
-bool dns_print_readable(char **buf, size_t buflen, const uint8_t *source, size_t len, bool escape_dot)
+bool dns_print_readable(char **buf, size_t buflen, const uint8_t *source, size_t len, bool is_name)
 {
     char *endbuf = *buf + buflen;
     size_t label_length_offset = 0;
 
     for(size_t i = 0; i < len; i++)
     {
-        if(i == label_length_offset)
+        if(i == label_length_offset && is_name)
         {
             if(endbuf - *buf <= 1)
             {
@@ -1297,7 +1297,7 @@ bool dns_print_readable(char **buf, size_t buflen, const uint8_t *source, size_t
             continue;
         }
         if(source[i] >= ' ' && source[i] <= '~' && source[i] != '\\' && (source[i] != '.'
-            || (source[i] == '.' && !escape_dot)))
+            || (source[i] == '.' && !is_name)))
         {
             if(endbuf - *buf <= 1)
             {
@@ -1370,9 +1370,24 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             break;
         case DNS_REC_TXT:
         {
-            *(ptr++) = '"';
-            dns_print_readable(&ptr, sizeof(buf), record->data.raw, record->length, false);
-            *(ptr++) = '"';
+            uint8_t *record_end = record->data.raw + record->length;
+            uint8_t *data_ptr = record->data.raw;
+            while(data_ptr < record_end)
+            {
+                uint8_t length = *(data_ptr++);
+                if (data_ptr + length <= record_end)
+                {
+                    *(ptr++) = '"';
+                    dns_print_readable(&ptr, sizeof(buf), data_ptr, length, false);
+                    data_ptr += length;
+                    *(ptr++) = '"';
+                    *(ptr++) = ' ';
+                }
+                else
+                {
+                    break;
+                }
+            }
             *ptr = 0;
             break;
         }
