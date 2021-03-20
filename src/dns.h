@@ -1346,8 +1346,10 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
 {
     static char buf[0xFFFF0];
     static dns_name_t name;
+    int written;
 
     char *ptr = buf;
+    char *buf_end = buf + sizeof(buf);
 
     switch(record->type)
     {
@@ -1356,7 +1358,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
         case DNS_REC_DNAME:
         case DNS_REC_PTR:
             parse_name(begin, record->data.raw, end, name.name, &name.length, NULL);
-            dns_print_readable(&ptr, sizeof(buf), name.name, name.length, true);
+            dns_print_readable(&ptr, buf_end - ptr, name.name, name.length, true);
             break;
         case DNS_REC_MX:
             if(record->length < 3)
@@ -1366,7 +1368,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             parse_name(begin, record->data.raw + 2, end, name.name, &name.length, NULL);
             int no = sprintf(buf, "%" PRIu16 " ", ntohs(*((uint16_t*)record->data.raw)));
             ptr += no;
-            dns_print_readable(&ptr, sizeof(buf), name.name, name.length, true);
+            dns_print_readable(&ptr, buf_end - ptr, name.name, name.length, true);
             break;
         case DNS_REC_TXT:
         {
@@ -1378,7 +1380,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
                 if (data_ptr + length <= record_end)
                 {
                     if (put_quotes) *(ptr++) = '"';
-                    dns_print_readable(&ptr, sizeof(buf), data_ptr, length, false);
+                    dns_print_readable(&ptr, buf_end - ptr, data_ptr, length, false);
                     data_ptr += length;
                     if (put_quotes){
                         *(ptr++) = '"';
@@ -1403,7 +1405,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             }
 
             parse_name(begin, record->data.raw, end, name.name, &name.length, &next);
-            dns_print_readable(&ptr, sizeof(buf), name.name, name.length, true);
+            dns_print_readable(&ptr, buf_end - ptr, name.name, name.length, true);
             *(ptr++) = ' ';
 
             if(next + 20 >= record->data.raw + record->length)
@@ -1411,7 +1413,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
                 goto raw;
             }
             parse_name(begin, next, end, name.name, &name.length, &next);
-            dns_print_readable(&ptr, sizeof(buf), name.name, name.length, true);
+            dns_print_readable(&ptr, buf_end - ptr, name.name, name.length, true);
             *(ptr++) = ' ';
             if(next + 20 > record->data.raw + record->length)
             {
@@ -1446,19 +1448,36 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             {
                 goto raw;
             }
-            int written = sprintf(ptr, "%" PRIu8 " ", (uint8_t)(record->data.raw[0] >> 7));
+            written = sprintf(ptr, "%" PRIu8 " ", (uint8_t)(record->data.raw[0] >> 7));
             if(written < 0)
             {
                 return buf;
             }
             ptr += written;
-            dns_print_readable(&ptr, sizeof(buf), record->data.raw + 2, record->data.raw[1], true);
+            dns_print_readable(&ptr, buf_end - ptr, record->data.raw + 2, record->data.raw[1], true);
             *(ptr++) = ' ';
             *(ptr++) = '"';
-            dns_print_readable(&ptr, sizeof(buf), record->data.raw + 2 + record->data.raw[1],
+            dns_print_readable(&ptr, buf_end - ptr, record->data.raw + 2 + record->data.raw[1],
                                (size_t) (record->length - record->data.raw[1] - 2), true);
             *(ptr++) = '"';
             *ptr = 0;
+            break;
+        case DNS_REC_SRV:
+            if(record->length < 7)
+            {
+                goto raw;
+            }
+            uint16_t prio = ntohs(*((uint16_t*)(record->data.raw + 0)));
+            uint16_t weight = ntohs(*((uint16_t*)(record->data.raw + 2)));
+            uint16_t port = ntohs(*((uint16_t*)(record->data.raw + 4)));
+            written = snprintf(ptr, buf_end - ptr, "%" PRIu16 " %" PRIu16 " %" PRIu16 " ", prio, weight, port);
+            if(written < 0)
+            {
+                return buf;
+            }
+            ptr += written;
+            parse_name(begin, record->data.raw + 6, end, name.name, &name.length, NULL);
+            dns_print_readable(&ptr, buf_end - ptr, name.name, name.length, true);
             break;
         raw:
         default:
