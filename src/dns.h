@@ -1454,11 +1454,11 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
                 return buf;
             }
             ptr += written;
-            dns_print_readable(&ptr, buf_end - ptr, record->data.raw + 2, record->data.raw[1], true);
+            dns_print_readable(&ptr, buf_end - ptr, record->data.raw + 2, record->data.raw[1], false);
             *(ptr++) = ' ';
             *(ptr++) = '"';
             dns_print_readable(&ptr, buf_end - ptr, record->data.raw + 2 + record->data.raw[1],
-                               (size_t) (record->length - record->data.raw[1] - 2), true);
+                               (size_t) (record->length - record->data.raw[1] - 2), false);
             *(ptr++) = '"';
             *ptr = 0;
             break;
@@ -1481,7 +1481,7 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             break;
         raw:
         default:
-            dns_print_readable(&ptr, sizeof(buf), record->data.raw, record->length, true);
+            dns_print_readable(&ptr, sizeof(buf), record->data.raw, record->length, false);
             *ptr = 0;
     }
     return buf;
