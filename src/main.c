@@ -388,6 +388,52 @@ buffer_t massdns_resolvers_from_file(char *filename)
     single_list_free_with_elements(list);
     return resolvers;
 }
+buffer_t resolvers_from_line(char *line, char **qname)
+{
+    buffer_t resolvers;
+    resolvers.len = 0;
+    resolvers.data = NULL;
+    char** parts;
+    char* line_copy = strmcpy(line);
+    parts = str_split(line_copy, ' ');
+    char* domain = strmcpy(*parts);
+    *qname = domain;
+    // check if there are dedicated resolvers specified in the line
+    if (*(parts + 1))
+    {
+        single_list_t *list = single_list_new();
+        size_t i = 1;
+        while (*(parts + i))
+        {
+            resolver_t *resolver = safe_calloc(sizeof(*resolver));
+            struct sockaddr_storage *addr = &resolver->address;
+            if (str_to_addr(*(parts + i), 53, addr))
+            {
+                if((addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0)
+                    || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
+                {
+                    single_list_push_back(list, resolver);
+                }
+                else
+                {
+                    log_msg("No query socket for dedicated resolver \"%s\" found.\n", *(parts + i));
+                }
+            }
+            else
+            {
+                log_msg("\"%s\" is not a valid resolver. Skipped.\n", *(parts + i));
+            }
+            i++;
+        }
+        resolvers = single_list_to_array_copy(list, sizeof(resolver_t));
+        single_list_free_with_elements(list);
+    }
+    free(line_copy);
+    free(*parts);
+    free(parts);
+    return resolvers;
+}
+
 
 void set_sndbuf(int fd)
 {
@@ -480,9 +526,9 @@ void query_sockets_setup()
     }
 }
 
-bool next_query(char **qname)
+bool next_query(char **qname, buffer_t *dedicated_resolvers)
 {
-    static char line[512];
+    static char line[4048];
     static size_t line_index = 0;
 
     while (fgets(line, sizeof(line), context.domainfile))
@@ -500,8 +546,7 @@ bool next_query(char **qname)
         {
             continue;
         }
-        *qname = line;
-
+        *dedicated_resolvers = resolvers_from_line(line, qname);
         return true;
     }
     return false;
@@ -604,7 +649,12 @@ void send_query(lookup_t *lookup)
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
     if(!context.cmd_args.sticky || lookup->resolver == NULL)
     {
-        if(context.cmd_args.predictable_resolver)
+        if(lookup->dedicated_resolvers.len > 0 && lookup->dedicated_resolver_index + 1 < lookup->dedicated_resolvers.len)
+        {
+            lookup->resolver = ((resolver_t *) lookup->dedicated_resolvers.data) + lookup->dedicated_resolver_index;
+            lookup->dedicated_resolver_index++;
+        }
+        else if(context.cmd_args.predictable_resolver)
         {
             lookup->resolver = ((resolver_t *) context.resolvers.data) + context.lookup_index % context.resolvers.len;
         }
@@ -902,11 +952,12 @@ void done()
 void can_send()
 {
     char *qname;
+    buffer_t dedicated_resolvers;
     bool new;
 
     while (hashmapSize(context.map) < context.cmd_args.hashmap_size && context.state <= STATE_QUERYING)
     {
-        if(!next_query(&qname))
+        if(!next_query(&qname, &dedicated_resolvers))
         {
             if(hashmapSize(context.map) <= 0)
             {
@@ -918,6 +969,7 @@ void can_send()
         }
         context.stats.numdomains++;
         lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
+        lookup->dedicated_resolvers = dedicated_resolvers;
         if(!new)
         {
             continue;
