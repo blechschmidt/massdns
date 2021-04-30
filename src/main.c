@@ -413,6 +413,16 @@ buffer_t resolvers_from_line(char *line, char **qname)
                     || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
                 {
                     single_list_push_back(list, resolver);
+                    if (context.cmd_args.verify_ip)
+                    {
+                        errno = 0;
+                        hashmapPut(context.resolver_map, &resolver->address, resolver);
+                        if (errno != 0)
+                        {
+                            log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
+                            abort();
+                        }
+                    }
                 }
                 else
                 {
