@@ -659,7 +659,7 @@ void send_query(lookup_t *lookup)
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
     if(!context.cmd_args.sticky || lookup->resolver == NULL)
     {
-        if(lookup->dedicated_resolvers.len > 0 && lookup->dedicated_resolver_index + 1 < lookup->dedicated_resolvers.len)
+        if(lookup->dedicated_resolvers.len > 0 && lookup->dedicated_resolver_index < lookup->dedicated_resolvers.len)
         {
             lookup->resolver = ((resolver_t *) lookup->dedicated_resolvers.data) + lookup->dedicated_resolver_index;
             lookup->dedicated_resolver_index++;
