@@ -979,7 +979,10 @@ void can_send()
         }
         context.stats.numdomains++;
         lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
-        lookup->dedicated_resolvers = dedicated_resolvers;
+        if (lookup != NULL)
+        {
+            lookup->dedicated_resolvers = dedicated_resolvers;
+        }
         if(!new)
         {
             continue;
