@@ -46,6 +46,8 @@ void print_help()
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-group       Group to drop privileges to when running as root. (Default: nogroup)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
+                    "      --extended-input   Input names are followed by a space-separated list of resolvers.\n"
+                    "                         These are used before falling back to the resolvers file.\n"
                     "      --filter           Only output packets with the specified response code.\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
@@ -389,6 +391,79 @@ buffer_t massdns_resolvers_from_file(char *filename)
     return resolvers;
 }
 
+void extend_resolver_buffer(buffer_t *buffer, resolver_t *resolvers, size_t count) {
+    size_t old_size = buffer->len;
+    size_t new_size = old_size + count;
+    buffer->data = safe_realloc(buffer->data, new_size * sizeof(*resolvers));
+    memcpy(buffer->data + old_size * sizeof(*resolvers), resolvers, count * sizeof(*resolvers));
+    buffer->len = new_size;
+}
+
+buffer_t resolvers_from_line(char *line, char **qname)
+{
+    buffer_t resolvers;
+    resolvers.len = 0;
+    resolvers.data = NULL;
+
+    static resolver_t resolver_storage[32];
+    const size_t tempbuf_size = sizeof(resolver_storage) / sizeof(*resolver_storage);
+    size_t i = 0;
+
+    *qname = NULL;
+
+    while(true)
+    {
+        char *token = strtok(*qname == NULL ? line : NULL, " \t"); // NOLINT(concurrency-mt-unsafe)
+        if (token == NULL)
+        {
+            break;
+        }
+
+        if (*qname == NULL)
+        {
+            *qname = token;
+            continue;
+        }
+
+        resolver_t *resolver = resolver_storage + i;
+        struct sockaddr_storage *addr = &resolver->address;
+
+        if (str_to_addr(token, 53, addr))
+        {
+            if((addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0)
+               || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
+            {
+                if (++i == tempbuf_size)
+                {
+                    extend_resolver_buffer(&resolvers, resolver_storage, tempbuf_size);
+                    i = 0;
+                }
+                if (context.cmd_args.verify_ip)
+                {
+                    errno = 0;
+                    hashmapPut(context.resolver_map, &resolver->address, resolver);
+                    if (errno != 0)
+                    {
+                        log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
+                        abort();
+                    }
+                }
+            }
+            else
+            {
+                log_msg("No query socket for dedicated resolver \"%s\" found.\n", token);
+            }
+        }
+        else
+        {
+            log_msg("\"%s\" is not a valid resolver. Skipped.\n", token);
+        }
+    }
+    extend_resolver_buffer(&resolvers, resolver_storage, i);
+    return resolvers;
+}
+
+
 void set_sndbuf(int fd)
 {
     if(context.cmd_args.sndbuf
@@ -480,14 +555,14 @@ void query_sockets_setup()
     }
 }
 
-bool next_query(char **qname)
+bool next_query(char **qname, buffer_t *dedicated_resolvers)
 {
-    static char line[512];
+    static char line[4096];
     static size_t line_index = 0;
 
     while (fgets(line, sizeof(line), context.domainfile))
     {
-        if(line_index >= context.cmd_args.num_processes)
+        if (line_index >= context.cmd_args.num_processes)
         {
             line_index = 0;
         }
@@ -500,8 +575,18 @@ bool next_query(char **qname)
         {
             continue;
         }
-        *qname = line;
-
+        if (context.cmd_args.extended_input)
+        {
+            *dedicated_resolvers = resolvers_from_line(line, qname);
+            if (*qname == NULL)
+            {
+                continue;
+            }
+        }
+        else
+        {
+            *qname = line;
+        }
         return true;
     }
     return false;
@@ -542,7 +627,7 @@ void end_warmup()
     }
 }
 
-lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
+lookup_t *new_lookup(const char *qname, dns_record_type type)
 {
     if(context.lookup_pool.len == 0)
     {
@@ -567,10 +652,8 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     if(hashmapGet(context.map, key) != NULL)
     {
         context.lookup_pool.len++;
-        *new = false;
         return NULL;
     }
-    *new = true;
     lookup_t *value = &entry->value;
     bzero(value, sizeof(*value));
 
@@ -604,7 +687,12 @@ void send_query(lookup_t *lookup)
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
     if(!context.cmd_args.sticky || lookup->resolver == NULL)
     {
-        if(context.cmd_args.predictable_resolver)
+        if(lookup->dedicated_resolvers.len > 0 && lookup->dedicated_resolver_index < lookup->dedicated_resolvers.len)
+        {
+            lookup->resolver = ((resolver_t *) lookup->dedicated_resolvers.data) + lookup->dedicated_resolver_index;
+            lookup->dedicated_resolver_index++;
+        }
+        else if(context.cmd_args.predictable_resolver)
         {
             lookup->resolver = ((resolver_t *) context.resolvers.data) + context.lookup_index % context.resolvers.len;
         }
@@ -902,11 +990,12 @@ void done()
 void can_send()
 {
     char *qname;
-    bool new;
+    buffer_t dedicated_resolvers;
+    bzero(&dedicated_resolvers, sizeof(dedicated_resolvers));
 
     while (hashmapSize(context.map) < context.cmd_args.hashmap_size && context.state <= STATE_QUERYING)
     {
-        if(!next_query(&qname))
+        if(!next_query(&qname, &dedicated_resolvers))
         {
             if(hashmapSize(context.map) <= 0)
             {
@@ -917,11 +1006,12 @@ void can_send()
             break;
         }
         context.stats.numdomains++;
-        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
-        if(!new)
+        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type);
+        if(lookup == NULL)
         {
             continue;
         }
+        lookup->dedicated_resolvers = dedicated_resolvers;
         send_query(lookup);
     }
 }
@@ -1900,6 +1990,10 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--busypoll") == 0 || strcmp(argv[i], "--busy-poll") == 0)
         {
             context.cmd_args.busypoll = true;
+        }
+        else if (strcmp(argv[i], "--extended-input") == 0)
+        {
+            context.cmd_args.extended_input = true;
         }
         else if (strcmp(argv[i], "--resolvers") == 0 || strcmp(argv[i], "-r") == 0)
         {

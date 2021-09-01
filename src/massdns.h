@@ -85,6 +85,8 @@ typedef struct
     uint16_t transaction;
     void **ring_entry; // pointer to the entry within the timed ring for entry invalidation
     resolver_t *resolver;
+    buffer_t dedicated_resolvers;
+    size_t dedicated_resolver_index;
     lookup_key_t *key;
     socket_info_t *socket;
 } lookup_t;
@@ -181,6 +183,7 @@ typedef struct
         size_t num_processes;
         size_t socket_count;
         bool busypoll;
+        bool extended_input;
     } cmd_args;
 
     struct
