@@ -20,6 +20,8 @@ Usage: ./bin/massdns [options] [domainlist]
   -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
       --drop-group       Group to drop privileges to when running as root. (Default: nogroup)
       --drop-user        User to drop privileges to when running as root. (Default: nobody)
+      --extended-input   Input names are followed by a space-separated list of resolvers.
+                         These are used before falling back to the resolvers file.
       --filter           Only output packets with the specified response code.
       --flush            Flush the output file whenever a response was received.
   -h  --help             Show this help.
