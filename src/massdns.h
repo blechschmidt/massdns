@@ -183,6 +183,7 @@ typedef struct
         size_t num_processes;
         size_t socket_count;
         bool busypoll;
+        bool extended_input;
     } cmd_args;
 
     struct

@@ -46,6 +46,8 @@ void print_help()
                     "  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)\n"
                     "      --drop-group       Group to drop privileges to when running as root. (Default: nogroup)\n"
                     "      --drop-user        User to drop privileges to when running as root. (Default: nobody)\n"
+                    "      --extended-input   Input names are followed by a space-separated list of resolvers.\n"
+                    "                         These are used before falling back to the resolvers file.\n"
                     "      --filter           Only output packets with the specified response code.\n"
                     "      --flush            Flush the output file whenever a response was received.\n"
                     "  -h  --help             Show this help.\n"
@@ -388,59 +390,76 @@ buffer_t massdns_resolvers_from_file(char *filename)
     single_list_free_with_elements(list);
     return resolvers;
 }
+
+void extend_resolver_buffer(buffer_t *buffer, resolver_t *resolvers, size_t count) {
+    size_t old_size = buffer->len;
+    size_t new_size = old_size + count;
+    buffer->data = safe_realloc(buffer->data, new_size * sizeof(*resolvers));
+    memcpy(buffer->data + old_size * sizeof(*resolvers), resolvers, count * sizeof(*resolvers));
+    buffer->len = new_size;
+}
+
 buffer_t resolvers_from_line(char *line, char **qname)
 {
     buffer_t resolvers;
     resolvers.len = 0;
     resolvers.data = NULL;
-    char** parts;
-    char* line_copy = strmcpy(line);
-    parts = str_split(line_copy, ' ');
-    char* domain = strmcpy(*parts);
-    *qname = domain;
-    // check if there are dedicated resolvers specified in the line
-    if (*(parts + 1))
+
+    static resolver_t resolver_storage[32];
+    const size_t tempbuf_size = sizeof(resolver_storage) / sizeof(*resolver_storage);
+    size_t i = 0;
+
+    *qname = NULL;
+
+    while(true)
     {
-        single_list_t *list = single_list_new();
-        size_t i = 1;
-        while (*(parts + i))
+        char *token = strtok(*qname == NULL ? line : NULL, " \t"); // NOLINT(concurrency-mt-unsafe)
+        if (token == NULL)
         {
-            resolver_t *resolver = safe_calloc(sizeof(*resolver));
-            struct sockaddr_storage *addr = &resolver->address;
-            if (str_to_addr(*(parts + i), 53, addr))
+            break;
+        }
+
+        if (*qname == NULL)
+        {
+            *qname = token;
+            continue;
+        }
+
+        resolver_t *resolver = resolver_storage + i;
+        struct sockaddr_storage *addr = &resolver->address;
+
+        if (str_to_addr(token, 53, addr))
+        {
+            if((addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0)
+               || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
             {
-                if((addr->ss_family == AF_INET && context.sockets.interfaces4.len > 0)
-                    || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
+                if (++i == tempbuf_size)
                 {
-                    single_list_push_back(list, resolver);
-                    if (context.cmd_args.verify_ip)
-                    {
-                        errno = 0;
-                        hashmapPut(context.resolver_map, &resolver->address, resolver);
-                        if (errno != 0)
-                        {
-                            log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
-                            abort();
-                        }
-                    }
+                    extend_resolver_buffer(&resolvers, resolver_storage, tempbuf_size);
+                    i = 0;
                 }
-                else
+                if (context.cmd_args.verify_ip)
                 {
-                    log_msg("No query socket for dedicated resolver \"%s\" found.\n", *(parts + i));
+                    errno = 0;
+                    hashmapPut(context.resolver_map, &resolver->address, resolver);
+                    if (errno != 0)
+                    {
+                        log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
+                        abort();
+                    }
                 }
             }
             else
             {
-                log_msg("\"%s\" is not a valid resolver. Skipped.\n", *(parts + i));
+                log_msg("No query socket for dedicated resolver \"%s\" found.\n", token);
             }
-            i++;
         }
-        resolvers = single_list_to_array_copy(list, sizeof(resolver_t));
-        single_list_free_with_elements(list);
+        else
+        {
+            log_msg("\"%s\" is not a valid resolver. Skipped.\n", token);
+        }
     }
-    free(line_copy);
-    free(*parts);
-    free(parts);
+    extend_resolver_buffer(&resolvers, resolver_storage, i);
     return resolvers;
 }
 
@@ -538,12 +557,12 @@ void query_sockets_setup()
 
 bool next_query(char **qname, buffer_t *dedicated_resolvers)
 {
-    static char line[4048];
+    static char line[4096];
     static size_t line_index = 0;
 
     while (fgets(line, sizeof(line), context.domainfile))
     {
-        if(line_index >= context.cmd_args.num_processes)
+        if (line_index >= context.cmd_args.num_processes)
         {
             line_index = 0;
         }
@@ -556,7 +575,18 @@ bool next_query(char **qname, buffer_t *dedicated_resolvers)
         {
             continue;
         }
-        *dedicated_resolvers = resolvers_from_line(line, qname);
+        if (context.cmd_args.extended_input)
+        {
+            *dedicated_resolvers = resolvers_from_line(line, qname);
+            if (*qname == NULL)
+            {
+                continue;
+            }
+        }
+        else
+        {
+            *qname = line;
+        }
         return true;
     }
     return false;
@@ -597,7 +627,7 @@ void end_warmup()
     }
 }
 
-lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
+lookup_t *new_lookup(const char *qname, dns_record_type type)
 {
     if(context.lookup_pool.len == 0)
     {
@@ -622,10 +652,8 @@ lookup_t *new_lookup(const char *qname, dns_record_type type, bool *new)
     if(hashmapGet(context.map, key) != NULL)
     {
         context.lookup_pool.len++;
-        *new = false;
         return NULL;
     }
-    *new = true;
     lookup_t *value = &entry->value;
     bzero(value, sizeof(*value));
 
@@ -963,7 +991,7 @@ void can_send()
 {
     char *qname;
     buffer_t dedicated_resolvers;
-    bool new;
+    bzero(&dedicated_resolvers, sizeof(dedicated_resolvers));
 
     while (hashmapSize(context.map) < context.cmd_args.hashmap_size && context.state <= STATE_QUERYING)
     {
@@ -978,15 +1006,12 @@ void can_send()
             break;
         }
         context.stats.numdomains++;
-        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type, &new);
-        if (lookup != NULL)
-        {
-            lookup->dedicated_resolvers = dedicated_resolvers;
-        }
-        if(!new)
+        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type);
+        if(lookup == NULL)
         {
             continue;
         }
+        lookup->dedicated_resolvers = dedicated_resolvers;
         send_query(lookup);
     }
 }
@@ -1965,6 +1990,10 @@ int parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--busypoll") == 0 || strcmp(argv[i], "--busy-poll") == 0)
         {
             context.cmd_args.busypoll = true;
+        }
+        else if (strcmp(argv[i], "--extended-input") == 0)
+        {
+            context.cmd_args.extended_input = true;
         }
         else if (strcmp(argv[i], "--resolvers") == 0 || strcmp(argv[i], "-r") == 0)
         {
