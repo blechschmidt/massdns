@@ -61,7 +61,8 @@ void print_help()
                     "      --processes        Number of processes to be used for resolving. (Default: 1)\n"
                     "  -q  --quiet            Quiet mode.\n"
                     "      --rcvbuf           Size of the receive buffer in bytes.\n"
-                    "      --retry            Unacceptable DNS response codes. (Default: REFUSED)\n"
+                    "      --retry            Unacceptable DNS response codes.\n"
+                    "                         (Default: All codes but OK or NXDOMAIN)\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Do not drop privileges when running as root. Not recommended.\n"
                     "  -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)\n"
@@ -1979,7 +1980,9 @@ int parse_cmd(int argc, char **argv)
     context.cmd_args.interval_ms = 500;
     context.cmd_args.timed_ring_buckets = 10000;
     context.cmd_args.output = OUTPUT_TEXT_FULL;
-    context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = true;
+    memset(context.cmd_args.retry_codes, true, sizeof(context.cmd_args.retry_codes));
+    context.cmd_args.retry_codes[DNS_RCODE_NXDOMAIN] = false;
+    context.cmd_args.retry_codes[DNS_RCODE_OK] = false;
     context.cmd_args.num_processes = 1;
     context.cmd_args.socket_count = 1;
 #ifndef HAVE_EPOLL
@@ -2022,14 +2025,14 @@ int parse_cmd(int argc, char **argv)
             {
                 if(!context.cmd_args.retry_codes_set)
                 {
-                    context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = false;
+                    memset(context.cmd_args.retry_codes, false, sizeof(context.cmd_args.retry_codes));
                     context.cmd_args.retry_codes_set = true;
                 }
                 context.cmd_args.retry_codes[rcode] = true;
             }
             else if(strcasecmp(argv[i], "never") == 0)
             {
-                context.cmd_args.retry_codes[DNS_RCODE_REFUSED] = false;
+                memset(context.cmd_args.retry_codes, false, sizeof(context.cmd_args.retry_codes));
                 context.cmd_args.retry_codes_set = true;
             }
             else

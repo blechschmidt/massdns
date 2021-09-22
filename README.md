@@ -35,7 +35,8 @@ Usage: ./bin/massdns [options] [domainlist]
       --processes        Number of processes to be used for resolving. (Default: 1)
   -q  --quiet            Quiet mode.
       --rcvbuf           Size of the receive buffer in bytes.
-      --retry            Unacceptable DNS response codes. (Default: REFUSED)
+      --retry            Unacceptable DNS response codes.
+                         (Default: All codes but OK or NXDOMAIN)
   -r  --resolvers        Text file containing DNS resolvers.
       --root             Do not drop privileges when running as root. Not recommended.
   -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)
