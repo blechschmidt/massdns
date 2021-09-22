@@ -487,7 +487,7 @@ void add_default_socket(int version)
     socket_info_t info;
 
     info.descriptor = socket(version == 4 ? PF_INET : PF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    info.protocol = version == 4 ? PROTO_IPV4 : PROTO_IPV6;
+    info.protocol = version == 4 ? AF_INET : AF_INET6;
     info.type = SOCKET_TYPE_QUERY;
     if(info.descriptor >= 0)
     {
@@ -512,7 +512,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         struct sockaddr_storage* addr = element->data;
         socket_info_t info;
         info.descriptor = socket(addr->ss_family, SOCK_DGRAM, IPPROTO_UDP);
-        info.protocol = addr->ss_family == AF_INET ? PROTO_IPV4 : PROTO_IPV6;
+        info.protocol = addr->ss_family;
         info.type = SOCKET_TYPE_QUERY;
         if(info.descriptor >= 0)
         {
@@ -713,12 +713,12 @@ void send_query(lookup_t *lookup)
         interfaces = &context.sockets.interfaces6;
     }
 
-    if(lookup->socket == NULL)
+    if(lookup->socket == NULL || lookup->socket->protocol != lookup->resolver->address.ss_family)
     {
         // Pick a random socket from that pool
         // Pool of sockets cannot be empty due to check when parsing resolvers. Socket creation must have succeeded.
         size_t socket_index = urandom_size_t() % interfaces->len;
-        lookup->socket = (socket_info_t *) interfaces->data + socket_index;
+        lookup->socket = ((socket_info_t *) interfaces->data) + socket_index;
     }
 
     ssize_t result = dns_question_create_from_name(query_buffer, &lookup->key->name, lookup->key->type,

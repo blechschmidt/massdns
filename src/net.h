@@ -18,12 +18,6 @@
 
 typedef enum
 {
-    PROTO_IPV4 = 1 << 0,
-    PROTO_IPV6 = 1 << 1
-} ip_support_t;
-
-typedef enum
-{
     SOCKET_TYPE_INTERFACE,
     SOCKET_TYPE_QUERY,
     SOCKET_TYPE_CONTROL
@@ -37,7 +31,7 @@ typedef enum
 
 typedef struct
 {
-    ip_support_t protocol;
+    sa_family_t protocol;
     int descriptor;
     socket_type_t type;
     void *data;
