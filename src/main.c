@@ -601,7 +601,7 @@ int hash_lookup_key(void *key)
     int c;
     while ((c = *entry++) != 0)
     {
-        hash = ((hash << 5) + hash) + tolower(c); /* hash * 33 + c */
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
     }
     hash = ((hash << 5) + hash) + ((((lookup_key_t *)key)->type & 0xFF00) >> 8);
     hash = ((hash << 5) + hash) + (((lookup_key_t *)key)->type & 0x00FF);
@@ -640,8 +640,9 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     ssize_t name_length = dns_str2namebuf(qname, key->name.name);
     if(name_length < 0)
     {
-        key->name.length = 1;
-        key->name.name[0] = 0;
+        log_msg("Illegal DNS name: %s\n", qname);
+        context.lookup_pool.len++;
+        return NULL;
     }
     else
     {
@@ -651,6 +652,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     key->type = type;
     if(hashmapGet(context.map, key) != NULL)
     {
+        log_msg("Duplicate DNS name: %s\n", qname);
         context.lookup_pool.len++;
         return NULL;
     }
@@ -1155,6 +1157,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 || (context.cmd_args.filter_mode == FILTER_POSITIVE
                     && !context.cmd_args.filter_codes[packet.head.header.rcode])))
         {
+            write_exhausted_tries(lookup, "FILTERED");
             lookup_done(lookup);
             return;
         }
@@ -1286,7 +1289,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                         }
                     }
 
-                    if((context.format.match_name && !dns_names_eq(&rec.name, &packet.head.question.name))
+                    if((context.format.match_name && !dns_raw_names_eq(&rec.name, &packet.head.question.name))
                             || !context.format.sections[section])
                     {
                         continue;
@@ -1402,7 +1405,7 @@ void can_read(socket_info_t *info)
 
 bool cmp_lookup(void *lookup1, void *lookup2)
 {
-    return dns_names_eq(&((lookup_key_t *) lookup1)->name, &((lookup_key_t *) lookup2)->name);
+    return dns_raw_names_eq(&((lookup_key_t *) lookup1)->name, &((lookup_key_t *) lookup2)->name);
 }
 
 void binfile_write_head()

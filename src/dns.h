@@ -957,6 +957,10 @@ ssize_t dns_str2namebuf(const char *name, uint8_t *buffer)
                 *(bufname++) = 0;
                 break;
             }
+            if (*name == '.')
+            {
+                return -1;
+            }
             lenptr = bufname++;
             label_len = 0;
         }
