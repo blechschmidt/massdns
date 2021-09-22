@@ -1160,7 +1160,8 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         }
 
         // Print packet
-        time_t now = time(NULL);
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
         uint16_t short_len = (uint16_t) len;
         uint8_t *next = parse_offset;
         dns_record_t rec;
@@ -1173,7 +1174,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         {
             case OUTPUT_BINARY:
                 // The output file is platform dependent for performance reasons.
-                fwrite(&now, sizeof(now), 1, context.outfile);
+                fwrite(&now.tv_sec, sizeof(now.tv_sec), 1, context.outfile);
                 fwrite(recvaddr, sizeof(*recvaddr), 1, context.outfile);
                 fwrite(&short_len, sizeof(short_len), 1, context.outfile);
                 fwrite(offset, short_len, 1, context.outfile);
@@ -1182,18 +1183,20 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
             case OUTPUT_TEXT_FULL: // Print packet similar to dig style
                 // Resolver and timestamp are not part of the packet, we therefore have to print it manually
                 fprintf(context.outfile, ";; Server: %s\n;; Size: %" PRIu16 "\n;; Unix time: %lu\n",
-                        sockaddr2str(recvaddr), short_len, now);
+                        sockaddr2str(recvaddr), short_len, now.tv_sec);
                 dns_print_packet(context.outfile, &packet, offset, len, next);
                 break;
 
             case OUTPUT_NDJSON: // Only print records from answer section that match the query name (in ndjson)
                 json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
                 fprintf(context.outfile,
-                        "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\",\"data\":{",
+                        "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\","
+                        "\"rx_ts\":%lu%09lu,\"data\":{",
                         json_buffer,
                         dns_record_type2str((dns_record_type) packet.head.question.type),
                         dns_class2str((dns_class) packet.head.question.class),
-                        dns_rcode2str((dns_rcode) packet.head.header.rcode));
+                        dns_rcode2str((dns_rcode) packet.head.header.rcode),
+                        now.tv_sec, now.tv_nsec);
                 for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++, section_index++)
                 {
                     if(section == DNS_SECTION_ANSWER && section_index >= packet.head.header.ans_count) {
@@ -1251,7 +1254,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                         fprintf(context.outfile,
                                 "%s %lu %s %s %s %s\n",
                                 sockaddr2str(recvaddr),
-                                now,
+                                now.tv_sec,
                                 dns_rcode2str((dns_rcode)packet.head.header.rcode),
                                 dns_name2str(&packet.head.question.name),
                                 context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
