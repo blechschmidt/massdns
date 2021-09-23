@@ -65,6 +65,9 @@ Advanced flags for the simple output mode:
   s - Separate packet sections using a line feed.
   t - Include TTL and record class within the output.
   u - Include records from the authority section.
+
+Advanced flags for the ndjson output mode:
+  e - Write a record for each terminal query failure.
 ```
 
 This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.

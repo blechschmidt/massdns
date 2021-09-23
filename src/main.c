@@ -93,7 +93,10 @@ void print_help()
                     "  r - Print the question with resolver IP address, Unix timestamp and return code prepended.\n"
                     "  s - Separate packet sections using a line feed.\n"
                     "  t - Include TTL and record class within the output.\n"
-                    "  u - Include records from the authority section.\n",
+                    "  u - Include records from the authority section.\n"
+                    "\n"
+                    "Advanced flags for the ndjson output mode:\n"
+                    "  e - Write a record for each terminal query failure.\n",
                     context.cmd_args.argv[0] ? context.cmd_args.argv[0] : "massdns"
     );
 }
