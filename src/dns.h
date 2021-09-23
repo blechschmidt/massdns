@@ -422,7 +422,7 @@ typedef enum
 
 typedef enum
 {
-    DNS_RCODE_OK = 0,
+    DNS_RCODE_NOERROR = 0,
     DNS_RCODE_FORMERR = 1,
     DNS_RCODE_SERVFAIL = 2,
     DNS_RCODE_NXDOMAIN = 3,
@@ -446,7 +446,7 @@ bool dns_str2rcode(char *str, dns_rcode *code)
 {
     if(strcasecmp(str, "ok") == 0 || strcasecmp(str, "noerror") == 0)
     {
-        *code = DNS_RCODE_OK;
+        *code = DNS_RCODE_NOERROR;
         return true;
     }
     else if(strcasecmp(str, "formerr") == 0)
@@ -790,7 +790,7 @@ char *dns_rcode2str(dns_rcode rcode)
 
     switch (rcode)
     {
-        case DNS_RCODE_OK:
+        case DNS_RCODE_NOERROR:
             return "NOERROR";
         case DNS_RCODE_FORMERR:
             return "FORMERR";

@@ -62,7 +62,7 @@ void print_help()
                     "  -q  --quiet            Quiet mode.\n"
                     "      --rcvbuf           Size of the receive buffer in bytes.\n"
                     "      --retry            Unacceptable DNS response codes.\n"
-                    "                         (Default: All codes but OK or NXDOMAIN)\n"
+                    "                         (Default: All codes but NOERROR or NXDOMAIN)\n"
                     "  -r  --resolvers        Text file containing DNS resolvers.\n"
                     "      --root             Do not drop privileges when running as root. Not recommended.\n"
                     "  -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)\n"
@@ -85,7 +85,7 @@ void print_help()
                     "  J - ndjson output\n"
                     "\n"
                     "Advanced flags for the domain list output mode:\n"
-                    "  0 - Include OK replies without answers.\n"
+                    "  0 - Include NOERROR replies without answers.\n"
                     "\n"
                     "Advanced flags for the simple output mode:\n"
                     "  d - Include records from the additional section.\n"
@@ -755,7 +755,7 @@ void send_query(lookup_t *lookup)
     }
 }
 
-#define STAT_IDX_OK 0
+#define STAT_IDX_NOERROR 0
 #define STAT_IDX_NXDOMAIN 1
 #define STAT_IDX_SERVFAIL 2
 #define STAT_IDX_REFUSED 3
@@ -770,12 +770,12 @@ void my_stats_to_msg(stats_exchange_t *stats_msg)
     stats_msg->mismatch_id = context.stats.mismatch_id;
     stats_msg->numdomains = context.stats.numdomains;
     stats_msg->numreplies = context.stats.numreplies;
-    stats_msg->all_rcodes[STAT_IDX_OK] = context.stats.all_rcodes[DNS_RCODE_OK];
+    stats_msg->all_rcodes[STAT_IDX_NOERROR] = context.stats.all_rcodes[DNS_RCODE_NOERROR];
     stats_msg->all_rcodes[STAT_IDX_NXDOMAIN] = context.stats.all_rcodes[DNS_RCODE_NXDOMAIN];
     stats_msg->all_rcodes[STAT_IDX_SERVFAIL] = context.stats.all_rcodes[DNS_RCODE_SERVFAIL];
     stats_msg->all_rcodes[STAT_IDX_REFUSED] = context.stats.all_rcodes[DNS_RCODE_REFUSED];
     stats_msg->all_rcodes[STAT_IDX_FORMERR] = context.stats.all_rcodes[DNS_RCODE_FORMERR];
-    stats_msg->final_rcodes[STAT_IDX_OK] = context.stats.final_rcodes[DNS_RCODE_OK];
+    stats_msg->final_rcodes[STAT_IDX_NOERROR] = context.stats.final_rcodes[DNS_RCODE_NOERROR];
     stats_msg->final_rcodes[STAT_IDX_NXDOMAIN] = context.stats.final_rcodes[DNS_RCODE_NXDOMAIN];
     stats_msg->final_rcodes[STAT_IDX_SERVFAIL] = context.stats.final_rcodes[DNS_RCODE_SERVFAIL];
     stats_msg->final_rcodes[STAT_IDX_REFUSED] = context.stats.final_rcodes[DNS_RCODE_REFUSED];
@@ -895,7 +895,7 @@ void check_progress()
                 stat_abs_share(context.stats.mismatch_id, context.stats.numparsed),
                 timeouts,
 
-                rcode_stat(DNS_RCODE_OK),
+                rcode_stat(DNS_RCODE_NOERROR),
                 rcode_stat(DNS_RCODE_NXDOMAIN),
                 rcode_stat(DNS_RCODE_SERVFAIL),
                 rcode_stat(DNS_RCODE_REFUSED),
@@ -963,7 +963,7 @@ void check_progress()
                 stat_abs_share(context.stat_messages[0].mismatch_id, context.stat_messages[0].numparsed),
                 timeouts,
 
-                rcode_stat_multi(STAT_IDX_OK),
+                rcode_stat_multi(STAT_IDX_NOERROR),
                 rcode_stat_multi(STAT_IDX_NXDOMAIN),
                 rcode_stat_multi(STAT_IDX_SERVFAIL),
                 rcode_stat_multi(STAT_IDX_REFUSED),
@@ -1192,7 +1192,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 fwrite(offset, short_len, 1, context.outfile);
                 break;
             case OUTPUT_LIST:
-                if (packet.head.header.rcode == DNS_RCODE_OK
+                if (packet.head.header.rcode == DNS_RCODE_NOERROR
                 && (packet.head.header.ans_count > 0 || context.format.list_write_zero_answers)) {
                     buf = dns_name2str(&packet.head.question.name);
                     size_t name_len = strlen(buf);
@@ -2001,7 +2001,7 @@ int parse_cmd(int argc, char **argv)
     context.cmd_args.output = OUTPUT_TEXT_FULL;
     memset(context.cmd_args.retry_codes, true, sizeof(context.cmd_args.retry_codes));
     context.cmd_args.retry_codes[DNS_RCODE_NXDOMAIN] = false;
-    context.cmd_args.retry_codes[DNS_RCODE_OK] = false;
+    context.cmd_args.retry_codes[DNS_RCODE_NOERROR] = false;
     context.cmd_args.num_processes = 1;
     context.cmd_args.socket_count = 1;
 #ifndef HAVE_EPOLL

@@ -36,7 +36,7 @@ Usage: ./bin/massdns [options] [domainlist]
   -q  --quiet            Quiet mode.
       --rcvbuf           Size of the receive buffer in bytes.
       --retry            Unacceptable DNS response codes.
-                         (Default: All codes but OK or NXDOMAIN)
+                         (Default: All codes but NOERROR or NXDOMAIN)
   -r  --resolvers        Text file containing DNS resolvers.
       --root             Do not drop privileges when running as root. Not recommended.
   -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)
@@ -56,7 +56,7 @@ Output flags:
   J - ndjson output
 
 Advanced flags for the domain list output mode:
-  0 - Include OK replies without answers.
+  0 - Include NOERROR replies without answers.
 
 Advanced flags for the simple output mode:
   d - Include records from the additional section.
