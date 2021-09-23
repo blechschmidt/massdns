@@ -111,6 +111,7 @@ typedef enum
     OUTPUT_TEXT_FULL,
     OUTPUT_TEXT_SIMPLE,
     OUTPUT_BINARY,
+    OUTPUT_LIST,
     OUTPUT_NDJSON
 } output_t;
 
@@ -145,6 +146,7 @@ typedef struct
         bool indent_sections;
         bool print_question;
         bool write_exhausted_tries;
+        bool list_write_zero_answers;
     } format;
 
     struct cmd_args

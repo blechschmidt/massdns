@@ -49,10 +49,14 @@ Usage: ./bin/massdns [options] [domainlist]
   -w  --outfile          Write to the specified output file instead of standard output.
 
 Output flags:
+  L - domain list output
   S - simple text output
   F - full text output
   B - binary output
   J - ndjson output
+
+Advanced flags for the domain list output mode:
+  0 - Include OK replies without answers.
 
 Advanced flags for the simple output mode:
   d - Include records from the additional section.

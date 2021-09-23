@@ -78,10 +78,14 @@ void print_help()
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "\n"
                     "Output flags:\n"
+                    "  L - domain list output\n"
                     "  S - simple text output\n"
                     "  F - full text output\n"
                     "  B - binary output\n"
                     "  J - ndjson output\n"
+                    "\n"
+                    "Advanced flags for the domain list output mode:\n"
+                    "  0 - Include OK replies without answers.\n"
                     "\n"
                     "Advanced flags for the simple output mode:\n"
                     "  d - Include records from the additional section.\n"
@@ -1176,6 +1180,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         dns_section_t section = DNS_SECTION_ANSWER;
         size_t section_index = 0;
         bool section_emitted = false;
+        char *buf;
 
         switch(context.cmd_args.output)
         {
@@ -1185,6 +1190,17 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 fwrite(recvaddr, sizeof(*recvaddr), 1, context.outfile);
                 fwrite(&short_len, sizeof(short_len), 1, context.outfile);
                 fwrite(offset, short_len, 1, context.outfile);
+                break;
+            case OUTPUT_LIST:
+                if (packet.head.header.rcode == DNS_RCODE_OK
+                && (packet.head.header.ans_count > 0 || context.format.list_write_zero_answers)) {
+                    buf = dns_name2str(&packet.head.question.name);
+                    size_t name_len = strlen(buf);
+                    if(name_len > 0 && buf[name_len - 1] == '.') {
+                        buf[name_len - 1] = '\0';
+                    }
+                    fprintf(context.outfile, "%s\n", buf);
+                }
                 break;
 
             case OUTPUT_TEXT_FULL: // Print packet similar to dig style
@@ -2146,6 +2162,22 @@ int parse_cmd(int argc, char **argv)
             {
                 case 'B':
                     context.cmd_args.output = OUTPUT_BINARY;
+                    break;
+
+                case 'L':
+                    context.cmd_args.output = OUTPUT_LIST;
+                    for(char *output_option = argv[i] + 1; *output_option != 0; output_option++)
+                    {
+                        switch(*output_option)
+                        {
+                            case '0':
+                                context.format.list_write_zero_answers = true;
+                                break;
+                            default:
+                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                clean_exit(EXIT_FAILURE);
+                        }
+                    }
                     break;
 
                 case 'J':
