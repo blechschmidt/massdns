@@ -1,11 +1,48 @@
 #!/usr/bin/env python
 
+import argparse
+import os
 import sys
 
-if len(sys.argv) < 3:
-	print("Usage: %s <subdomains> <domain1> ... <domainN>" % sys.argv[0])
+parser = argparse.ArgumentParser(description='Subdomain enumeration list generator.')
+parser.add_argument('subdomain_file', type=str, help='Subdomain dictionary.')
+parser.add_argument('-d', '--domains', metavar='domain_file', type=str, help='File name of domains to append.',
+                    required=False)
+parser.add_argument('domain', nargs='*')
+args = parser.parse_intermixed_args()
 
-for lines in open(sys.argv[1]):
-	for arg in sys.argv[2:]:
-		if lines.strip() != "":
-			print(lines.strip() + "." + arg)
+if not args.domain and not args.domains:
+    sys.stderr.write('Either a domain file is required or domains have to be specified as additional arguments.\n')
+    sys.exit(1)
+
+
+def append_domain(lst, dom):
+    stripped = dom.strip().strip('.')
+    if stripped != '':
+        lst.append(stripped)
+
+
+domains = []
+if args.domains:
+    with open(args.domains) as f:
+        for line in f:
+            append_domain(domains, line)
+
+for domain in args.domain:
+    append_domain(domains, domain)
+
+with open(args.subdomain_file) as f:
+    for line in f:
+        subdomain = line.strip().strip('.')
+        if subdomain == '':
+            continue
+        for domain in domains:
+            try:
+                print(subdomain + '.' + domain)
+            except BrokenPipeError:
+                # https://docs.python.org/3/library/signal.html#note-on-sigpipe
+                # Python flushes standard streams on exit; redirect remaining output
+                # to devnull to avoid another BrokenPipeError at shutdown
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(devnull, sys.stdout.fileno())
+                sys.exit(1)  # Python exits with error code 1 on EPIPE
