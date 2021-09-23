@@ -155,6 +155,11 @@ In case rate limiting by IPv6 resolvers is a problem, have a look at the [freebi
 ### Result authenticity
 If the authenticity of results is highly essential, you should not rely on the included resolver list. Instead, set up a local [unbound](https://www.unbound.net/) resolver and supply MassDNS with its IP address. In case you are using MassDNS as a reconnaissance tool, you may wish to run it with the default resolver list first and re-run it on the found names with a list of trusted resolvers in order to eliminate false positives.
 
+In case you are enumerating subdomains for a single name, e.g. for `example.com`, you may want to simply leave out third-party resolvers. In this case, you can directly probe the authoritative nameservers like so:
+```
+$ ./bin/massdns -r <(./scripts/auth-addrs.sh example.com) --norecurse -o Je example-com-subdomains.txt > results.txt
+```
+
 ## Todo
 - Prevent flooding resolvers which are employing rate limits or refusing resolves after some time
 - Implement bandwidth limits
