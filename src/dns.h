@@ -46,6 +46,8 @@ typedef enum
     DNS_REC_NSEC3 = 50,
     DNS_REC_NSEC3PARAM = 51,
     DNS_REC_OPENPGPKEY = 61,
+    DNS_REC_SVCB = 64,
+    DNS_REC_HTTPS = 65,
     DNS_REC_PTR = 12,
     DNS_REC_RP = 17,
     DNS_REC_RRSIG = 46,
@@ -194,11 +196,23 @@ dns_record_type dns_str_to_record_type(const char *str)
                     return DNS_REC_INVALID;
             }
         case 'h':
-            if (tolower(str[1]) == 'i' && tolower(str[2]) == 'p' && str[3] == 0)
+            switch (tolower(str[1]))
             {
-                return DNS_REC_HIP;
+                case 'i':
+                    if(tolower(str[2]) == 'p' && str[3] == 0)
+                    {
+                        return DNS_REC_HIP;
+                    }
+                    return DNS_REC_INVALID;
+                case 't':
+                    if(tolower(str[2]) == 't' && tolower(str[3]) == 'p' && tolower(str[4]) == 's' && str[5] == 0)
+                    {
+                        return DNS_REC_HTTPS;
+                    }
+                    return DNS_REC_INVALID;
+                default:
+                    return DNS_REC_INVALID;
             }
-            return DNS_REC_INVALID;
         case 'i':
             if (tolower(str[1]) == 'p' && tolower(str[2]) == 's' && tolower(str[3]) == 'e' && tolower(str[4]) == 'c'
                 && tolower(str[5]) == 'k' && tolower(str[6]) == 'e' && tolower(str[7]) == 'y' && str[8] == 0)
@@ -336,6 +350,12 @@ dns_record_type dns_str_to_record_type(const char *str)
                     if (tolower(str[2]) == 'h' && tolower(str[3]) == 'f' && tolower(str[4]) == 'p' && str[5] == 0)
                     {
                         return DNS_REC_SSHFP;
+                    }
+                    return DNS_REC_INVALID;
+                case 'v':
+                    if (tolower(str[2]) == 'c' && tolower(str[3]) == 'b' && str[4] == 0)
+                    {
+                        return DNS_REC_SVCB;
                     }
                     return DNS_REC_INVALID;
                 default:
@@ -918,6 +938,10 @@ char *dns_record_type2str(dns_record_type type)
             return "TXT";
         case DNS_REC_URI:
             return "URI";
+        case DNS_REC_SVCB:
+            return "SVCB";
+        case DNS_REC_HTTPS:
+            return "HTTPS";
         default:
             snprintf(numbuf, sizeof(numbuf), "%" PRIu16, (uint16_t)type);
             return numbuf;
