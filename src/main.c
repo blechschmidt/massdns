@@ -326,7 +326,6 @@ bool addresses_equal(void *param1, void *param2)
                       &((struct sockaddr_in6*)addr2)->sin6_addr, sizeof(((struct sockaddr_in6*)addr1)->sin6_addr)) == 0
                && ((struct sockaddr_in6*)addr1)->sin6_port == ((struct sockaddr_in6*)addr2)->sin6_port;
     }
-    return false;
 }
 
 buffer_t massdns_resolvers_from_file(char *filename)
@@ -1129,8 +1128,6 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     context.stats.numparsed++;
     context.stats.all_rcodes[packet.head.header.rcode]++;
 
-    // TODO: Remove unnecessary copy.
-    //search_key.domain = (char*)packet.head.question.name.name;
     lookup = hashmapGet(context.map, &packet.head.question);
     if(!lookup) // Most likely reason: delayed response after duplicate query
     {
@@ -1660,7 +1657,7 @@ void setup_pipes()
 
             context.sockets.master_pipes_read[i].descriptor = context.sockets.pipes[2 * i];
             context.sockets.master_pipes_read[i].type = SOCKET_TYPE_CONTROL;
-            context.sockets.master_pipes_read[i].data = (void*)i;
+            context.sockets.master_pipes_read[i].data = (void*)i; // NOLINT(performance-no-int-to-ptr)
 
             if(context.cmd_args.busypoll)
             {
@@ -1968,7 +1965,7 @@ void use_stdin()
     context.domainfile = stdin;
 }
 
-int parse_cmd(int argc, char **argv)
+void parse_cmd(int argc, char **argv)
 {
     bool domain_param = false;
 
@@ -2414,8 +2411,6 @@ int parse_cmd(int argc, char **argv)
         log_msg("In order to use multiprocessing, the domain list needs to be supplied as file.\n");
         clean_exit(EXIT_FAILURE);
     }
-
-    return 0;
 }
 
 int main(int argc, char **argv)
@@ -2427,12 +2422,7 @@ int main(int argc, char **argv)
     setrlimit(RLIMIT_CORE, &core_limits);
 #endif
 
-    int rcode = parse_cmd(argc, argv);
-    if(rcode != 0)
-    {
-        return rcode;
-    }
-
+    parse_cmd(argc, argv);
     run();
     cleanup();
 
