@@ -87,15 +87,9 @@ typedef struct
     resolver_t *resolver;
     buffer_t dedicated_resolvers;
     size_t dedicated_resolver_index;
-    lookup_key_t *key;
+    lookup_key_t key;
     socket_info_t *socket;
 } lookup_t;
-
-typedef struct
-{
-    lookup_key_t key;
-    lookup_t value;
-} lookup_entry_t;
 
 typedef enum
 {
@@ -131,7 +125,7 @@ const char *default_interfaces[] = {""};
 typedef struct
 {
     buffer_t resolvers;
-    lookup_entry_t *lookup_space;
+    lookup_t *lookup_space;
     buffer_t lookup_pool;
     Hashmap *resolver_map;
 

@@ -641,10 +641,9 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
         log_msg("Empty lookup pool.\n");
         clean_exit(EXIT_FAILURE);
     }
-    lookup_entry_t *entry = ((lookup_entry_t**)context.lookup_pool.data)[--context.lookup_pool.len];
-    lookup_key_t *key = &entry->key;
+    lookup_t *lookup = ((lookup_t**)context.lookup_pool.data)[--context.lookup_pool.len];
 
-    ssize_t name_length = dns_str2namebuf(qname, key->name.name);
+    ssize_t name_length = dns_str2namebuf(qname, lookup->key.name.name);
     if(name_length < 0)
     {
         log_msg("Illegal DNS name: %s\n", qname);
@@ -653,25 +652,31 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     }
     else
     {
-        key->name.length = name_length;
+        lookup->key.name.length = name_length;
     }
 
-    key->type = type;
-    if(hashmapGet(context.map, key) != NULL)
+    lookup->key.type = type;
+    if(hashmapGet(context.map, &lookup->key) != NULL)
     {
         log_msg("Duplicate DNS name: %s\n", qname);
         context.lookup_pool.len++;
         return NULL;
     }
-    lookup_t *value = &entry->value;
-    bzero(value, sizeof(*value));
+    //bzero(value, sizeof(*value));
+    lookup->resolver = NULL;
+    lookup->dedicated_resolvers.data = NULL;
+    lookup->dedicated_resolvers.len = 0;
+    lookup->socket = NULL;
+    lookup->transaction = 0;
+    lookup->dedicated_resolver_index = 0;
+    lookup->ring_entry = NULL;
+    lookup->tries = 0;
 
-    value->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, value);
-    urandom_get(&value->transaction, sizeof(value->transaction));
-    value->key = key;
+    lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
+    urandom_get(&lookup->transaction, sizeof(lookup->transaction));
 
     errno = 0;
-    hashmapPut(context.map, key, value);
+    hashmapPut(context.map, &lookup->key, lookup);
     if(errno != 0)
     {
         log_msg("Error putting lookup into hashmap: %s\n", strerror(errno));
@@ -685,7 +690,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
         end_warmup();
     }
 
-    return value;
+    return lookup;
 }
 
 void send_query(lookup_t *lookup)
@@ -730,11 +735,11 @@ void send_query(lookup_t *lookup)
         lookup->socket = ((socket_info_t *) interfaces->data) + socket_index;
     }
 
-    ssize_t result = dns_question_create_from_name(query_buffer, &lookup->key->name, lookup->key->type,
+    ssize_t result = dns_question_create_from_name(query_buffer, &lookup->key.name, lookup->key.type,
                                                    lookup->transaction);
     if (result < DNS_PACKET_MINIMUM_SIZE)
     {
-        log_msg("Failed to create DNS question for query \"%s\".", dns_name2str(&lookup->key->name));
+        log_msg("Failed to create DNS question for query \"%s\".", dns_name2str(&lookup->key.name));
         return;
     }
 
@@ -1033,10 +1038,10 @@ bool is_unacceptable(dns_pkt_t *packet)
 void write_exhausted_tries(lookup_t *lookup, char *status)
 {
     if(context.cmd_args.output == OUTPUT_NDJSON && context.format.write_exhausted_tries) {
-        json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&lookup->key->name));
+        json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&lookup->key.name));
         fprintf(context.outfile,
                 "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"error\":\"%s\"}\n", json_buffer,
-                dns_record_type2str(lookup->key->type), "IN", status);
+                dns_record_type2str(lookup->key.type), "IN", status);
     }
 }
 
@@ -1050,11 +1055,11 @@ void lookup_done(lookup_t *lookup)
         lookup->dedicated_resolvers.len = 0;
     }
 
-    hashmapRemove(context.map, lookup->key);
+    hashmapRemove(context.map, &lookup->key);
 
     // Return lookup to pool.
     // According to ISO/IEC 9899:TC2 §6.7.2.1 (13), structs are not padded at the beginning
-    ((lookup_key_t**)context.lookup_pool.data)[context.lookup_pool.len++] = lookup->key;
+    ((lookup_t**)context.lookup_pool.data)[context.lookup_pool.len++] = lookup;
 
     can_send();
 
@@ -1741,7 +1746,7 @@ void run()
     context.lookup_space = safe_calloc(context.lookup_pool.len * sizeof(*context.lookup_space));
     for(size_t i = 0; i < context.lookup_pool.len; i++)
     {
-        ((lookup_entry_t**)context.lookup_pool.data)[i] = context.lookup_space + i;
+        ((lookup_t**)context.lookup_pool.data)[i] = context.lookup_space + i;
     }
 
     timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
