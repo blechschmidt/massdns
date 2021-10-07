@@ -2088,7 +2088,7 @@ void parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--bindto") == 0 || strcmp(argv[i], "-b") == 0)
         {
             expect_arg(i);
-            struct sockaddr_storage *addr = safe_malloc(sizeof(addr));
+            struct sockaddr_storage *addr = safe_malloc(sizeof(*addr));
             if (!str_to_addr(argv[++i], 0, addr))
             {
                 free(addr);
