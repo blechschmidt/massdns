@@ -1045,6 +1045,12 @@ void lookup_done(lookup_t *lookup)
 {
     context.stats.finished++;
 
+    if(context.cmd_args.extended_input)
+    {
+        safe_free(&lookup->dedicated_resolvers.data);
+        lookup->dedicated_resolvers.len = 0;
+    }
+
     hashmapRemove(context.map, lookup->key);
 
     // Return lookup to pool.
