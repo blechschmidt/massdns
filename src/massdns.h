@@ -167,7 +167,6 @@ typedef struct
         char *drop_group;
         dns_record_type record_type;
         size_t timed_ring_buckets;
-        int extreme; // Do not remove EPOLLOUT after warmup
         output_t output;
         bool retry_codes[0xFFFF]; // Fast lookup map for DNS reply codes that are unacceptable and require a retry
         bool retry_codes_set;

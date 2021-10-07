@@ -619,7 +619,7 @@ int hash_lookup_key(void *key)
 void end_warmup()
 {
     context.state = STATE_QUERYING;
-    if(context.cmd_args.extreme <= 1 && !context.cmd_args.busypoll)
+    if(!context.cmd_args.busypoll)
     {
         // Reduce our CPU load from epoll interrupts by removing the EPOLLOUT event
 #ifdef PCAP_SUPPORT
@@ -1056,14 +1056,7 @@ void lookup_done(lookup_t *lookup)
     // According to ISO/IEC 9899:TC2 §6.7.2.1 (13), structs are not padded at the beginning
     ((lookup_key_t**)context.lookup_pool.data)[context.lookup_pool.len++] = lookup->key;
 
-
-    // When transmission is not aggressive, we only start a new lookup after another one has finished.
-    // When our transmission is very aggressive, we also start a new lookup, although we listen for EPOLLOUT
-    // events as well.
-    if(context.cmd_args.extreme == 0 || context.cmd_args.extreme == 2)
-    {
-        can_send();
-    }
+    can_send();
 
     if(context.state == STATE_COOLDOWN && hashmapSize(context.map) <= 0)
     {
@@ -2276,10 +2269,6 @@ void parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0)
         {
             context.cmd_args.quiet = true;
-        }
-        else if (strcmp(argv[i], "--extreme") == 0)
-        {
-            context.cmd_args.extreme = (int) expect_arg_nonneg(i++, 0, 2);
         }
         else if (strcmp(argv[i], "--resolve-count") == 0 || strcmp(argv[i], "-c") == 0)
         {
