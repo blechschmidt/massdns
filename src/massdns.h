@@ -73,6 +73,12 @@ typedef struct
     resolver_stats_t stats; // To be used to track resolver bans or non-replying resolvers
 } resolver_t;
 
+typedef struct {
+    size_t len;
+    size_t ref_count;
+    resolver_t resolvers[];
+} dedicated_resolvers_t;
+
 typedef struct
 {
     dns_name_t name;
@@ -85,7 +91,7 @@ typedef struct
     uint16_t transaction;
     void **ring_entry; // pointer to the entry within the timed ring for entry invalidation
     resolver_t *resolver;
-    buffer_t dedicated_resolvers;
+    dedicated_resolvers_t *dedicated_resolvers;
     size_t dedicated_resolver_index;
     lookup_key_t key;
     socket_info_t *socket;
@@ -159,7 +165,9 @@ typedef struct
         int rcvbuf;
         char *drop_user;
         char *drop_group;
-        dns_record_type record_type;
+        dns_record_type *record_types;
+        size_t record_type_count;
+        size_t record_type_index;
         size_t timed_ring_buckets;
         output_t output;
         bool retry_codes[0xFFFF]; // Fast lookup map for DNS reply codes that are unacceptable and require a retry

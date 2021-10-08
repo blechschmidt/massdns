@@ -189,6 +189,8 @@ void cleanup()
         pcap_close(context.pcap);
     }
 #endif
+    free(context.cmd_args.record_types);
+
     if(context.map)
     {
         hashmapFree(context.map);
@@ -398,20 +400,16 @@ buffer_t massdns_resolvers_from_file(char *filename)
     return resolvers;
 }
 
-void extend_resolver_buffer(buffer_t *buffer, resolver_t *resolvers, size_t count) {
-    size_t old_size = buffer->len;
+void extend_resolver_buffer(dedicated_resolvers_t **buffer, resolver_t *resolvers, size_t count) {
+    size_t old_size = (*buffer) == NULL ? 0 : (*buffer)->len;
     size_t new_size = old_size + count;
-    buffer->data = safe_realloc(buffer->data, new_size * sizeof(*resolvers));
-    memcpy(buffer->data + old_size * sizeof(*resolvers), resolvers, count * sizeof(*resolvers));
-    buffer->len = new_size;
+    *buffer = safe_realloc(*buffer, sizeof(**buffer) + new_size * sizeof(*resolvers));
+    memcpy(&(*buffer)->resolvers[old_size], resolvers, count * sizeof(*resolvers));
+    (*buffer)->len = new_size;
 }
 
-buffer_t resolvers_from_line(char *line, char **qname)
+void resolvers_from_line(char *line, char **qname, dedicated_resolvers_t **resolvers)
 {
-    buffer_t resolvers;
-    resolvers.len = 0;
-    resolvers.data = NULL;
-
     static resolver_t resolver_storage[32];
     const size_t tempbuf_size = sizeof(resolver_storage) / sizeof(*resolver_storage);
     size_t i = 0;
@@ -442,7 +440,7 @@ buffer_t resolvers_from_line(char *line, char **qname)
             {
                 if (++i == tempbuf_size)
                 {
-                    extend_resolver_buffer(&resolvers, resolver_storage, tempbuf_size);
+                    extend_resolver_buffer(resolvers, resolver_storage, tempbuf_size);
                     i = 0;
                 }
                 if (context.cmd_args.verify_ip)
@@ -466,8 +464,7 @@ buffer_t resolvers_from_line(char *line, char **qname)
             log_msg("\"%s\" is not a valid resolver. Skipped.\n", token);
         }
     }
-    extend_resolver_buffer(&resolvers, resolver_storage, i);
-    return resolvers;
+    extend_resolver_buffer(resolvers, resolver_storage, i);
 }
 
 
@@ -562,18 +559,33 @@ void query_sockets_setup()
     }
 }
 
-bool next_query(char **qname, buffer_t *dedicated_resolvers)
+bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_record_type *rtype)
 {
     static char line[4096];
     static size_t line_index = 0;
+    static char* last_qname = NULL;
+    static dedicated_resolvers_t *last_dedicated_resolvers = NULL;
+
+    context.cmd_args.record_type_index %= context.cmd_args.record_type_count;
+    *rtype = context.cmd_args.record_types[context.cmd_args.record_type_index];
+
+    if(context.cmd_args.record_type_index++ != 0)
+    {
+        *qname = last_qname;
+        *dedicated_resolvers = last_dedicated_resolvers;
+        if (last_dedicated_resolvers != NULL)
+        {
+            last_dedicated_resolvers->ref_count++;
+        }
+        return true;
+    }
+
+    last_dedicated_resolvers = NULL;
+    last_qname = NULL;
 
     while (fgets(line, sizeof(line), context.domainfile))
     {
-        if (line_index >= context.cmd_args.num_processes)
-        {
-            line_index = 0;
-        }
-        if (context.fork_index != line_index++)
+        if (context.fork_index != ((line_index++) % context.cmd_args.num_processes))
         {
             continue;
         }
@@ -584,16 +596,19 @@ bool next_query(char **qname, buffer_t *dedicated_resolvers)
         }
         if (context.cmd_args.extended_input)
         {
-            *dedicated_resolvers = resolvers_from_line(line, qname);
+            resolvers_from_line(line, qname, dedicated_resolvers);
             if (*qname == NULL)
             {
                 continue;
             }
+            last_dedicated_resolvers = *dedicated_resolvers;
+            (*dedicated_resolvers)->ref_count = 1;
         }
         else
         {
             *qname = line;
         }
+        last_qname = *qname;
         return true;
     }
     return false;
@@ -634,6 +649,14 @@ void end_warmup()
     }
 }
 
+void lookup_cleanup_dedicated_resolvers(lookup_t *lookup)
+{
+    if(lookup->dedicated_resolvers != NULL && --lookup->dedicated_resolvers->ref_count == 0)
+    {
+        safe_free((void **) &lookup->dedicated_resolvers);
+    }
+}
+
 lookup_t *new_lookup(const char *qname, dns_record_type type)
 {
     if(context.lookup_pool.len == 0)
@@ -647,8 +670,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     if(name_length < 0)
     {
         log_msg("Illegal DNS name: %s\n", qname);
-        context.lookup_pool.len++;
-        return NULL;
+        goto fail;
     }
     else
     {
@@ -659,13 +681,11 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     if(hashmapGet(context.map, &lookup->key) != NULL)
     {
         log_msg("Duplicate DNS name: %s\n", qname);
-        context.lookup_pool.len++;
-        return NULL;
+        goto fail;
     }
     //bzero(value, sizeof(*value));
     lookup->resolver = NULL;
-    lookup->dedicated_resolvers.data = NULL;
-    lookup->dedicated_resolvers.len = 0;
+    lookup->dedicated_resolvers = NULL;
     lookup->socket = NULL;
     lookup->transaction = 0;
     lookup->dedicated_resolver_index = 0;
@@ -691,6 +711,12 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     }
 
     return lookup;
+
+    fail:
+    context.cmd_args.record_type_index = 0;
+    lookup_cleanup_dedicated_resolvers(lookup);
+    context.lookup_pool.len++;
+    return NULL;
 }
 
 void send_query(lookup_t *lookup)
@@ -701,9 +727,9 @@ void send_query(lookup_t *lookup)
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
     if(!context.cmd_args.sticky || lookup->resolver == NULL)
     {
-        if(lookup->dedicated_resolvers.len > 0 && lookup->dedicated_resolver_index < lookup->dedicated_resolvers.len)
+        if(lookup->dedicated_resolvers != NULL && lookup->dedicated_resolver_index < lookup->dedicated_resolvers->len)
         {
-            lookup->resolver = ((resolver_t *) lookup->dedicated_resolvers.data) + lookup->dedicated_resolver_index;
+            lookup->resolver = &lookup->dedicated_resolvers->resolvers[lookup->dedicated_resolver_index];
             lookup->dedicated_resolver_index++;
         }
         else if(context.cmd_args.predictable_resolver)
@@ -1004,12 +1030,12 @@ void done()
 void can_send()
 {
     char *qname;
-    buffer_t dedicated_resolvers;
-    bzero(&dedicated_resolvers, sizeof(dedicated_resolvers));
+    dedicated_resolvers_t *dedicated_resolvers = NULL;
+    dns_record_type rtype;
 
     while (hashmapSize(context.map) < context.cmd_args.hashmap_size && context.state <= STATE_QUERYING)
     {
-        if(!next_query(&qname, &dedicated_resolvers))
+        if(!next_query(&qname, &dedicated_resolvers, &rtype))
         {
             if(hashmapSize(context.map) <= 0)
             {
@@ -1020,7 +1046,7 @@ void can_send()
             break;
         }
         context.stats.numdomains++;
-        lookup_t *lookup = new_lookup(qname, context.cmd_args.record_type);
+        lookup_t *lookup = new_lookup(qname, rtype);
         if(lookup == NULL)
         {
             continue;
@@ -1049,12 +1075,6 @@ void lookup_done(lookup_t *lookup)
 {
     context.stats.finished++;
 
-    if(context.cmd_args.extended_input)
-    {
-        safe_free(&lookup->dedicated_resolvers.data);
-        lookup->dedicated_resolvers.len = 0;
-    }
-
     hashmapRemove(context.map, &lookup->key);
 
     // Return lookup to pool.
@@ -1062,6 +1082,8 @@ void lookup_done(lookup_t *lookup)
     ((lookup_t**)context.lookup_pool.data)[context.lookup_pool.len++] = lookup;
 
     can_send();
+
+    lookup_cleanup_dedicated_resolvers(lookup);
 
     if(context.state == STATE_COOLDOWN && hashmapSize(context.map) <= 0)
     {
@@ -1963,6 +1985,18 @@ void use_stdin()
     context.domainfile = stdin;
 }
 
+bool cmd_resolve_type(dns_record_type type)
+{
+    for(size_t i = 0; i < context.cmd_args.record_type_count; i++)
+    {
+        if(context.cmd_args.record_types[i] == type)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void parse_cmd(int argc, char **argv)
 {
     bool domain_param = false;
@@ -1983,7 +2017,6 @@ void parse_cmd(int argc, char **argv)
     context.ether_type_ip6 = htons(ETHERTYPE_IPV6);
 #endif
 
-    context.cmd_args.record_type = DNS_REC_INVALID;
     context.domainfile_size = -1;
     context.state = STATE_WARMUP;
     context.logfile = stderr;
@@ -2120,18 +2153,21 @@ void parse_cmd(int argc, char **argv)
         else if (strcmp(argv[i], "--types") == 0 || strcmp(argv[i], "--type") == 0 || strcmp(argv[i], "-t") == 0)
         {
             expect_arg(i);
-            if (context.cmd_args.record_type != DNS_REC_INVALID)
-            {
-                log_msg("Currently, only one record type is supported.\n");
-                clean_exit(EXIT_FAILURE);
-            }
             dns_record_type rtype = dns_str_to_record_type(argv[++i]);
             if (rtype == DNS_REC_INVALID)
             {
                 log_msg("Unsupported record type: %s\n", argv[i]);
                 clean_exit(EXIT_FAILURE);
             }
-            context.cmd_args.record_type = rtype;
+            if (cmd_resolve_type(rtype))
+            {
+                log_msg("Duplicate record type (%s) unsupported\n", argv[i]);
+                clean_exit(EXIT_FAILURE);
+            }
+
+            size_t new_array_size = sizeof(*context.cmd_args.record_types) * (context.cmd_args.record_type_count + 1);
+            context.cmd_args.record_types = safe_realloc(context.cmd_args.record_types, new_array_size);
+            context.cmd_args.record_types[context.cmd_args.record_type_count++] = rtype;
         }
         else if (strcmp(argv[i], "--drop-group") == 0)
         {
@@ -2371,16 +2407,11 @@ void parse_cmd(int argc, char **argv)
             }
         }
     }
-    if (context.cmd_args.record_type == DNS_REC_INVALID)
+    if (context.cmd_args.record_type_count == 0)
     {
-        context.cmd_args.record_type = DNS_REC_A;
-    }
-    if (context.cmd_args.record_type == DNS_REC_ANY)
-    {
-        // Some operators will not reply to ANY requests:
-        // https://blog.cloudflare.com/deprecating-dns-any-meta-query-type/
-        // https://lists.dns-oarc.net/pipermail/dns-operations/2013-January/009501.html
-        log_msg("Note that DNS ANY scans might be unreliable.\n");
+        context.cmd_args.record_types = safe_malloc(sizeof(*context.cmd_args.record_types));
+        context.cmd_args.record_type_count = 1;
+        context.cmd_args.record_types[0] = DNS_REC_A;
     }
     if (context.cmd_args.resolvers == NULL)
     {
