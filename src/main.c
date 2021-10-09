@@ -8,6 +8,7 @@
 
 #include "massdns.h"
 #include "string.h"
+#include "random.h"
 #include "net.h"
 #include "cmd.h"
 #include "dns.h"
@@ -17,7 +18,6 @@
 #include <pwd.h>
 #include <grp.h>
 #include <sys/ioctl.h>
-#include <sys/random.h>
 #include <stddef.h>
 #ifdef HAVE_SYSINFO
     #include <sys/sysinfo.h>
@@ -207,6 +207,8 @@ void cleanup()
 
     free(context.sockets.interfaces4.data);
     free(context.sockets.interfaces6.data);
+
+    urandom_close();
 
     if(context.domainfile)
     {
@@ -691,7 +693,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     lookup->tries = 0;
 
     lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
-    getrandom(&lookup->transaction, sizeof(lookup->transaction), 0);
+    urandom_get(&lookup->transaction, sizeof(lookup->transaction));
 
     errno = 0;
     hashmapPut(context.map, &lookup->key, lookup);
@@ -736,9 +738,7 @@ void send_query(lookup_t *lookup)
         }
         else
         {
-            size_t resolver_index;
-            getrandom(&resolver_index, sizeof(resolver_index), 0);
-            lookup->resolver = ((resolver_t *) context.resolvers.data) + resolver_index % context.resolvers.len;
+            lookup->resolver = ((resolver_t *) context.resolvers.data) + urandom_size_t() % context.resolvers.len;
         }
     }
 
@@ -757,9 +757,7 @@ void send_query(lookup_t *lookup)
     {
         // Pick a random socket from that pool
         // Pool of sockets cannot be empty due to check when parsing resolvers. Socket creation must have succeeded.
-        size_t socket_index;
-        getrandom(&socket_index, sizeof(socket_index), 0);
-        socket_index %= interfaces->len;
+        size_t socket_index = urandom_size_t() % interfaces->len;
         lookup->socket = ((socket_info_t *) interfaces->data) + socket_index;
     }
 
@@ -1751,6 +1749,12 @@ void make_query_sockets_nonblocking()
 void run()
 {
     static char multiproc_outfile_name[8192];
+
+    if(!urandom_init())
+    {
+        log_msg("Failed to open /dev/urandom: %s\n", strerror(errno));
+        clean_exit(EXIT_FAILURE);
+    }
 
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
     if(context.map == NULL)
