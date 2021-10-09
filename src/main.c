@@ -2362,6 +2362,14 @@ void parse_cmd(int argc, char **argv)
         {
             context.cmd_args.verify_ip = true;
         }
+        else if (strcmp(argv[i], "--version") == 0)
+        {
+#ifndef MASSDNS_REVISION
+#define MASSDNS_REVISION "?"
+#endif
+            fprintf(stderr, "massdns %s\n", MASSDNS_REVISION);
+            clean_exit(EXIT_SUCCESS);
+        }
         else
         {
             if (context.cmd_args.domains == NULL)
