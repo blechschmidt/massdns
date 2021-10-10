@@ -14,6 +14,7 @@
 #include "dns.h"
 #include "list.h"
 #include "flow.h"
+#include "auto_concurrency.h"
 #include <unistd.h>
 #include <pwd.h>
 #include <grp.h>
@@ -108,6 +109,7 @@ void print_help()
 
 /* The default real-time status output, human reeadable, very granular stats */
 static const char* stats_fmt_ansi = "\033[H\033[2J" // Clear screen (probably simplest and most portable solution)
+        "Concurrency: %zu\n"
         "Processed queries: %zu\n"
         "Received packets: %zu\n"
         "Progress: %.2f%% (%02lld h %02lld min %02lld sec / %02lld h %02lld min %02lld sec)\n"
@@ -126,6 +128,7 @@ static const char* stats_fmt_ansi = "\033[H\033[2J" // Clear screen (probably si
 /* Optional real-time status output, all stats on a single line as valid JSON */
 static const char* stats_fmt_json =
     "{"
+        "\"concurrency\":%zu,"
         "\"processed_queries\":%zu,"
         "\"received_packets\":%zu,"
         "\"progress\":"
@@ -915,6 +918,7 @@ void check_progress()
 
         fprintf(stderr,
                 context.status_fmt,
+                concurrency_state.current_concurrency,
                 context.stats.numdomains,
                 context.stats.numreplies,
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
@@ -983,6 +987,7 @@ void check_progress()
 
         fprintf(stderr,
                 context.status_fmt,
+                concurrency_state.current_concurrency,  // TODO: This is only the concurrency of the main process.
                 context.stat_messages[0].numdomains,
                 context.stat_messages[0].numreplies,
                 progress * 100, h, min, sec, prog_h, prog_min, prog_sec, rate_pps, average_pps,
@@ -1033,7 +1038,8 @@ void can_send()
     dedicated_resolvers_t *dedicated_resolvers = NULL;
     dns_record_type rtype;
 
-    while (hashmapSize(context.map) < context.cmd_args.hashmap_size && context.state <= STATE_QUERYING)
+    while (hashmapSize(context.map) < min(context.cmd_args.hashmap_size, concurrency_state.current_concurrency)
+        && context.state <= STATE_QUERYING)
     {
         if(!next_query(&qname, &dedicated_resolvers, &rtype))
         {
@@ -1112,7 +1118,10 @@ void ring_timeout(void *param)
         return;
     }
 
+    auto_concurrency_handle(NULL);
+
     lookup_t *lookup = param;
+    context.stats.numtimeouts++;
     if(!retry(lookup))
     {
         write_exhausted_tries(lookup, "TIMEOUT");
@@ -1419,6 +1428,7 @@ void pcap_callback(u_char *arg, const struct pcap_pkthdr *header, const u_char *
         return;
     }
     do_read((uint8_t*)frame, len, &addr);
+    auto_concurrency_handle(NULL);
 }
 
 void pcap_can_read()
@@ -1442,8 +1452,8 @@ void can_read(socket_info_t *info)
     {
         return;
     }
-
     do_read(readbuf, (size_t)num_received, &recvaddr);
+    auto_concurrency_handle(NULL);
 }
 
 bool cmp_lookup(void *lookup1, void *lookup2)
@@ -1874,6 +1884,7 @@ void run()
         make_query_sockets_nonblocking();
     }
 
+    init_concurrency_controller();
 
     clock_gettime(CLOCK_MONOTONIC, &context.stats.start_time);
     check_progress();
@@ -2317,7 +2328,16 @@ void parse_cmd(int argc, char **argv)
         }
         else if (strcmp(argv[i], "--hashmap-size") == 0 || strcmp(argv[i], "-s") == 0)
         {
-            context.cmd_args.hashmap_size = (size_t) expect_arg_nonneg(i++, 1, SIZE_MAX);
+            if (strcmp(argv[i+1], "auto") == 0)
+            {
+                context.cmd_args.auto_concurrency = true;
+                context.cmd_args.hashmap_size = 100000;
+            }
+            else
+            {
+                context.cmd_args.hashmap_size = (size_t) expect_arg_nonneg(i, 1, SIZE_MAX);
+            }
+            i++;
         }
         else if (strcmp(argv[i], "--processes") == 0)
         {

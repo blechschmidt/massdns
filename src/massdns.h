@@ -187,6 +187,7 @@ typedef struct
         size_t socket_count;
         bool busypoll;
         bool extended_input;
+        bool auto_concurrency;
     } cmd_args;
 
     struct
@@ -222,6 +223,7 @@ typedef struct
         size_t numreplies;
         size_t numparsed;
         size_t numdomains;
+        size_t numtimeouts;
         struct timespec last_print;
         size_t current_rate;
         size_t success_rate;
@@ -233,6 +235,7 @@ typedef struct
         size_t mismatch_id;
         size_t mismatch_domain;
     } stats;
+
     stats_exchange_t *stat_messages;
 #ifdef PCAP_SUPPORT
     pcap_t *pcap;
