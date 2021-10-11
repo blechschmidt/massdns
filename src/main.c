@@ -1197,7 +1197,6 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 || (context.cmd_args.filter_mode == FILTER_POSITIVE
                     && !context.cmd_args.filter_codes[packet.head.header.rcode])))
         {
-            write_exhausted_tries(lookup, "FILTERED");
             lookup_done(lookup);
             return;
         }
@@ -1242,7 +1241,25 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 dns_print_packet(context.outfile, &packet, offset, len, next);
                 break;
 
-            case OUTPUT_NDJSON: // Only print records from answer section that match the query name (in ndjson)
+            case OUTPUT_NDJSON:
+                if (context.format.only_with_answers_or_referrals && packet.head.header.ans_count == 0)
+                {
+                    bool contains_referral = false;
+                    for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec)
+                        && rec_index < packet.head.header.ans_count + packet.head.header.auth_count; rec_index++)
+                    {
+                        if(rec_index >= packet.head.header.ans_count && rec.type == DNS_REC_NS
+                            && dns_raw_names_eq(&rec.name, &packet.head.question.name))
+                        {
+                            contains_referral = true;
+                        }
+                    }
+                    next = parse_offset;
+                    if(!contains_referral)
+                    {
+                        break;
+                    }
+                }
                 json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
                 fprintf(context.outfile,
                         "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\","
@@ -2235,6 +2252,9 @@ void parse_cmd(int argc, char **argv)
                     {
                         switch(*output_option)
                         {
+                            case 'a':
+                                context.format.only_with_answers_or_referrals = true;
+                                break;
                             case 'e':
                                 context.format.write_exhausted_tries = true;
                                 break;
