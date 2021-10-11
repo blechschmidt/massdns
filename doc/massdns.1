@@ -1,0 +1,273 @@
+.TH massdns 1 2021 1.0.0 "massdns man page"
+
+.SH NAME
+\fBmassdns\fP \- high\-performance DNS stub resolver for bulk lookups and reconnaissance
+
+.SH SYNOPSIS
+\fBmassdns\fP [options] \-r \fIresolvers.txt\fP \fIdomains.txt\fP
+
+.SH DESCRIPTION
+\fBmassdns\fP is a high\-performance DNS stub resolver.
+
+It is targeting researchers performing internet measurements and bug bounty hunters leveraging it for subdomain
+enumeration during their reconnaissance process. Being a stub resolver, \fBmassdns\fP relies on third\-party resolvers to perform recursive lookups.
+\fBmassdns\fP is written in C and does not make use of threads. Instead, it uses \fIepoll\fP on Linux to handle communication
+concurrently. The number of concurrent lookups is user\-controlled. All DNS requests are made using UDP.
+
+.SH COMMAND\-LINE OPTIONS
+\fBmassdns\fP currently does not follow POSIX convention recommendations. All command line arguments and their values have to be
+separated by spaces.
+
+.TP
+.B \-b \-\-bindto
+.br
+IP addresses for \fBmassdns\fP query sockets. When this option is not specified, \fBmassdns\fP will bind to 0.0.0.0:0, causing the operating pick an
+appropriate IP address and port. If this option is specified multiple times, a query socket for each address is created.
+When sending a query, a socket is then selected at random.
+
+.TP
+.B \-\-busy\-poll
+.br
+Instead of using \fIepoll\fP, \fBmassdns\fP will make use of busy\-waiting. This is a non\-configurable default on non\-Linux platforms, where
+.I epoll
+is not available. This is not very efficient, so you should refrain from using this option in most cases.
+
+.TP
+.B \-c \-\-resolve\-count
+.br
+This value is an integer that specifies how often \fBmassdns\fP attempts to resolve a name. A failure reason can either
+be due to a timeout (as specified by \fB\-i\fP) or an unacceptable response code (as specified by \fB\-\-retry\fP). For
+reliable resolvers and when a appropriate concurrency value is set, this value can be quite low. The default value is
+50, which is very high.
+
+.TP
+.B \-\-drop\-user
+This option is only relevant when you run the program as root, which is not recommended for security reasons.
+In this case, privileges will be dropped to the specified user. If this
+option is not specified, this will be the \fInobody\fP user if it exists on the system. If \fB\-\-drop\-group\fP is not
+specified, the group will be set to the main group of the specified user, which is \fInogroup\fP for \fInobody\fP.
+
+.TP
+.B \-\-drop\-group
+.br
+When being run as root, set the group to this value instead of the main group of the user specified by
+.B \-\-drop\-user
+
+.TP
+.B \-\-extended\-input
+.br
+By default, \fBmassdns\fP treats each input line as a query. When this option is specified, a line will be treated as a
+query separated from resolver addresses by a space. Instead of "example.com", an input line can then be
+"example.com 1.1.1.1 8.8.8.8:53", causing the program to attempt to resolve example.com via 1.1.1.1 and 8.8.8.8 before
+falling back to the resolver list. Port specification is optional. By default, DNS port 53 is used.
+
+.TP
+.B \-\-filter
+.br
+This option defines a DNS response code whitelist of packets to be printed. It can be specified multiple times.
+For example,
+.I \-\-filter NXDOMAIN \-\-filter REFUSED
+will only print packets with the specified codes. DNS response codes can either specified textually or numerically.
+This option and
+.B \-\-ignore
+are mutually exclusive.
+
+.TP
+.B \-\-flush
+.br
+This option causes the output stream to be flushed whenever a response was written.
+
+.TP
+.B \-\-help
+.br
+Shows a help text that is more compressed than this man page.
+
+.TP
+.B \-\-ignore
+.br
+In contrast to
+.B \-\-filter
+, this option defines a blacklist.
+
+.TP
+.B \-i \-\-interval
+.br
+This option specifies an timeout in milliseconds to wait between multiple resolves of the same domain. The default
+value is 500.
+
+.TP
+.B \-l \-\-error\-log
+.br
+Instead of logging to /dev/stderr, log to the specified file. This is useful because the status output can be quite
+noisy and cause errors to be overlooked when printed to stderr as well.
+
+.TP
+.B \-\-norecurse
+.br
+DNS has a flag called RD, which is short for "Recursion Desired". By default, \fBmassdns\fP assumes that you want to use
+it with recursive resolvers, so it will set this bit. Sometimes, for example when performing DNS cache snooping, you may
+want to unset this bit. You may also want to unset this bit when performing subdomain enumeration against authoritative
+nameservers.
+
+.TP
+.B \-o \-\-output
+.br
+This option specifies the output format. The first character specifies the general output class, such as whether to
+output JSON, human\-readable full\-text or binary data. The following characters specify advanced output flags that are
+specific to this output class.
+
+The following output classes are supported:
+.RS
+
+.TP
+L - \fBlist output\fP
+.br
+Only output the query names of response packets, i.e. effectively only output domains.
+
+.TP
+S - \fBsimple text output\fP
+.br
+Due to the multitude of advanced flags that have accumulated over time, the "simple text output" has become less simple.
+It now supports many flags that allow for an advanced customization of the output. Really, you should probably use JSON
+instead.
+
+.TP
+F - \fBfull text output\fP
+.br
+This output mode is not customizable and outputs all successful responses in the style of the \fBdig\fP tool.
+
+.TP
+F - \fBbinary output\fP
+.br
+The uncustomizable binary format is not formally specified but follows from the source code. The repository includes a
+\fIdnsparse.py\fP script that is kept up to date with the binary format as output by \fBmassdns\fP.
+
+.TP
+J - \fBNDJSON (new\-line delimited JSON)\fP
+.br
+Each line will contain a JSON object.
+.% TODO: Be more precise
+
+.% TODO: Add advanced output flags for all classes
+
+.RE
+
+Note that not all record types are supported. Only the binary output mode allows you to preserve the content of all
+records as it writes raw DNS packets to the output stream. The following record types are currently supported in
+non\-binary output modes:
+A, AAAA, CAA, CNAME, DNAME, MX, NS, SRV, PTR, SOA, TXT
+
+.TP
+.B \-\-predictable
+.br
+By default, the resolver for a query will be picked randomly for each transmission. If this option is specified,
+the resolver will be picked in a deterministic, predictable manner. The first query will use the first resolver from
+the list, the second query will use the second one and so on (modulo the number of resolvers). This can be leveraged
+to conduct resolver tests.
+
+.TP
+.B \-\-processes
+.br
+In case resolving with a single process is not fast enough, you can use more than one process. This option specifies the
+number of processes to be used, so the default value is 1. When multiple processes are used, \fB\-w\fP needs to be
+specified. \fBmassdns\fP will then fork and write the output of each process to a different file, following a
+shared\-nothing approach.
+
+.TP
+.B \-\-quiet
+.br
+When this option is specified, \fBmassdns\fP will not print progress stats and it will not display some warnings.
+
+.TP
+.B \-\-rcvbuf
+.br
+Size of the receive buffer of the query socket(s) in bytes.
+
+.TP
+.B \-r \-\-resolvers
+.br
+File containing the list of resolvers/nameservers to be used. Each line should contain an IPv4 or IPv6 address.
+Specifying ports (using a colon, together with square brackets in case of IPv6 addresses) is optional.
+By default, DNS port 53 will be used.
+
+.TP
+.B \-r \-\-retry
+.br
+This option specifies the DNS response codes that are considered a failure and cause a lookup to be retried. By default,
+\fBmassdns\fP will retry lookups for all responses without NOERROR or NXDOMAIN response code. As soon as this option is
+specified, it will behave as a whitelist for retries. This is useful because some resolvers will return codes such as
+REFUSED or SERVFAIL once you hit internal rate limits. When performing subdomain enumeration, you do not want to miss
+responses in this case, so they are retried automatically.
+
+This option accepts DNS response codes in textual or numeric format. Additionally, it supports the special value
+"never", which instructs \fBmassdns\fP to never consider any valid DNS response to be unacceptable. This would be a
+reasonable setting when working with reliable, trusted resolvers.
+
+.TP
+.B \-r \-\-root
+.br
+Do not drop the privileges when running as root. For security reasons, using this option is not recommended.
+
+.TP
+.B \-s \-\-hashmap\-size
+.br
+This option accepts an integer that controls the number of concurrent lookups and thus the lookup rate. When being too
+low, the available network performance is not exhausted. When being too high, it may overload resolvers or cause network
+congestion.
+
+Internally, \fBmassdns\fP makes use of a hash map which stores information about ongoing lookups. Thus, this option
+defines the number of ongoing lookups. When all slots of the hash map are occupied, the next lookup will take place as
+soon as one lookup times out (as specified by \fB\-\-i\fP) or returns an unacceptable response (as specified by
+\fB\-\-retry\fP).
+
+The value of this option is directly correlated with the number of successful lookups per second. Consider a single,
+non\-rate\-limiting name server with an average RTT of ca. 10ms. A value of 1 for this option can then already reach
+about 100 successful lookups per second. The default value of this option is 10,000.
+
+This option supports the special value "auto", which aims to adjust the concurrency automatically. At the moment, the
+"auto" feature doubles the number of concurrent lookups until timeouts are observed. Thus, this feature is experimental
+and useful only when all resolvers are 100 % reliable, e.g. in case they are authoritative.
+
+.TP
+.B \-\-sndbuf
+.br
+Size of the send buffer of the query socket(s) in bytes.
+
+.TP
+.B \-\-status\-fmt
+.br
+This option can be either "json" or "ansi". When it is not specified, it defaults to "ansi", causing \fBmassdns\fP to
+print out stats in human\-readable format to stderr. In case you want to automate the use of \fBmassdns\fP, you may want
+to use "json" to parse the output.
+
+.TP
+.B \-\-sticky
+.br
+Without this option, each lookup (including its retries) will pick a resolver at random. With this option, retries will
+stick to the same resolver.
+
+.TP
+.B \-\-socket-count
+.br
+If \fB\-\-bindto\fP has not been specified, this option controls the number of query sockets to use per IP version.
+
+.TP
+.B \-t \-\-type
+.br
+The DNS record type to be queried for. When this option is not present, the default value is "A". This option can be
+specified multiple times to query for multiple record types. Record types you may want to query include, but are not
+limited to, A, AAAA, MX, NS, TXT.
+
+.TP
+.B \-\-verify-ip
+.br
+By default, \fBmassdns\fP will not verify incoming IP addresses. This option enables source IP verification of incoming
+packets.
+
+.TP
+.B \-w \-\-outfile
+.br
+Instead of writing results to stdout, write them to the file specified by this option.
+
+.SH WEBSITE
+https://github.com/blechschmidt/massdns
