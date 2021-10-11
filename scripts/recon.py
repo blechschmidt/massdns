@@ -181,23 +181,24 @@ async def main():
         def filter_response(_):
             return False
 
-        for line in f:
-            parsed = json.loads(line)
-            if parsed['name'].rstrip('.') == wildcard_test_name.rstrip('.'):
-                if 'data' not in parsed:
-                    break
-                data = parsed['data']
-                answers = data.get('answers', [])
-                if answers == 0:
-                    break
-                compare = set(frozenset((k, v) for k, v in x.items() if k != 'name') for x in data.get('answers'))
+        if not args.no_wildcard_filter:
+            for line in f:
+                parsed = json.loads(line)
+                if parsed['name'].rstrip('.') == wildcard_test_name.rstrip('.'):
+                    if 'data' not in parsed:
+                        break
+                    data = parsed['data']
+                    answers = data.get('answers', [])
+                    if answers == 0:
+                        break
+                    compare = set(frozenset((k, v) for k, v in x.items() if k != 'name') for x in data.get('answers'))
 
-                def filter_response(answers):
-                    cmp = set(frozenset((k, v) for k, v in x.items() if k != 'name') for x in answers)
-                    return compare == cmp
+                    def filter_response(answ):
+                        cmp = set(frozenset((k, v) for k, v in x.items() if k != 'name') for x in answ)
+                        return compare == cmp
 
-            break
-        f.seek(0)
+                break
+            f.seek(0)
 
         for line in f:
             parsed = json.loads(line)
