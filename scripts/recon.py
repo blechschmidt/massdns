@@ -94,8 +94,8 @@ async def main():
     server_behavior = DnsServerBehavior()
 
     parser = argparse.ArgumentParser(description='Authoritative subdomain enumeration tool.')
-    parser.add_argument('-d', metavar='DOMAIN', help='Domain name.', required=True)
-    parser.add_argument('-w', metavar='WORDLIST', help='Subdomain wordlist file.', required=True)
+    parser.add_argument('--domain', '-d', metavar='DOMAIN', help='Domain name.', required=True)
+    parser.add_argument('--wordlist', '-w', metavar='WORDLIST', help='Subdomain wordlist file.', required=True)
     parser.add_argument('--skip-avail-check', help='Do not test whether nameservers are available.',
                         action='store_true')
     parser.add_argument('--no-referrals-only', help='Do not return records that refer to another nameserver only.',
