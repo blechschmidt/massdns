@@ -669,6 +669,15 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     }
     lookup_t *lookup = ((lookup_t**)context.lookup_pool.data)[--context.lookup_pool.len];
 
+    if(type == DNS_REC_PTR)
+    {
+        const char *new_qname = ip2ptr(qname);
+        if(new_qname != NULL)
+        {
+            qname = new_qname;
+        }
+    }
+
     ssize_t name_length = dns_str2namebuf(qname, lookup->key.name.name);
     if(name_length < 0)
     {

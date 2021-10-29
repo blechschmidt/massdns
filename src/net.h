@@ -149,6 +149,47 @@ bool str_to_addr(char *str, uint16_t default_port, struct sockaddr_storage *addr
     return false;
 }
 
+const char* ip2ptr(const char *qname)
+{
+    struct sockaddr_storage ptr_addr_storage;
+    static char ptr_query[1024];
+
+    if (inet_pton(AF_INET, qname, &((struct sockaddr_in*)&ptr_addr_storage)->sin_addr) == 1)
+    {
+        uint8_t *addr = (uint8_t*)&((struct sockaddr_in*)&ptr_addr_storage)->sin_addr.s_addr;
+        snprintf(ptr_query, sizeof(ptr_query) - 1, "%"PRIu8".%"PRIu8".%"PRIu8".%"PRIu8".in-addr.arpa.",
+                 addr[3], addr[2], addr[1], addr[0]);
+        return ptr_query;
+    }
+    else if (inet_pton(AF_INET6, qname, &((struct sockaddr_in6*)&ptr_addr_storage)->sin6_addr) == 1)
+    {
+        uint8_t *addr = (uint8_t*)&((struct sockaddr_in6*)&ptr_addr_storage)->sin6_addr.s6_addr;
+        snprintf(ptr_query, sizeof(ptr_query) - 1,
+                 "%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
+                 "%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
+                 "ip6.arpa.",
+                 addr[15] & 0xF, (addr[15] >> 4) & 0xF,
+                 addr[14] & 0xF, (addr[14] >> 4) & 0xF,
+                 addr[13] & 0xF, (addr[13] >> 4) & 0xF,
+                 addr[12] & 0xF, (addr[12] >> 4) & 0xF,
+                 addr[11] & 0xF, (addr[11] >> 4) & 0xF,
+                 addr[10] & 0xF, (addr[10] >> 4) & 0xF,
+                 addr[9] & 0xF, (addr[9] >> 4) & 0xF,
+                 addr[8] & 0xF, (addr[8] >> 4) & 0xF,
+                 addr[7] & 0xF, (addr[7] >> 4) & 0xF,
+                 addr[6] & 0xF, (addr[6] >> 4) & 0xF,
+                 addr[5] & 0xF, (addr[5] >> 4) & 0xF,
+                 addr[4] & 0xF, (addr[4] >> 4) & 0xF,
+                 addr[3] & 0xF, (addr[3] >> 4) & 0xF,
+                 addr[2] & 0xF, (addr[2] >> 4) & 0xF,
+                 addr[1] & 0xF, (addr[1] >> 4) & 0xF,
+                 addr[0] & 0xF, (addr[0] >> 4) & 0xF
+        );
+        return ptr_query;
+    }
+    return NULL;
+}
+
 #ifdef PCAP_SUPPORT
 int get_iface_hw_addr(char *iface, uint8_t *hw_mac)
 {
