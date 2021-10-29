@@ -14,6 +14,7 @@ debugnolinux:
 	mkdir -p bin
 	$(CC) $(CFLAGS) $(PROJECT_FLAGS) -O0 -std=c11 -Wall -fstack-protector-strong -g -DDEBUG src/main.c -o bin/massdns
 install:
-	test -d $(PREFIX) || mkdir $(PREFIX)
-	test -d $(PREFIX)/bin || mkdir $(PREFIX)/bin
+	mkdir -p $(PREFIX)/bin
+	mkdir -p $(PREFIX)/man/man1
 	install -m 0755 bin/massdns $(PREFIX)/bin
+	install -m 0644 doc/massdns.1 $(PREFIX)/man/man1
