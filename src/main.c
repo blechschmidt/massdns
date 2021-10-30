@@ -493,21 +493,37 @@ void add_default_socket(int version)
 {
     socket_info_t info;
 
-    info.descriptor = socket(version == 4 ? PF_INET : PF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    info.protocol = version == 4 ? AF_INET : AF_INET6;
-    info.type = SOCKET_TYPE_QUERY;
-    if(info.descriptor >= 0)
+    if(context.srcrand.enabled && version == 6)
     {
-        buffer_t *buffer = version == 4 ? &context.sockets.interfaces4 : &context.sockets.interfaces6;
-        buffer->data = safe_realloc(buffer->data, (buffer->len + 1) * sizeof(info));
-        ((socket_info_t*)buffer->data)[buffer->len++] = info;
-        set_rcvbuf(info.descriptor);
-        set_sndbuf(info.descriptor);
+        if((info.descriptor = socket(PF_INET6, SOCK_RAW, IPPROTO_UDP)) < 0)
+        {
+            goto error;
+        }
+        const int enable = 1;
+        if(setsockopt(info.descriptor, IPPROTO_IPV6, IPV6_HDRINCL, &enable, sizeof(enable)) < 0)
+        {
+            goto error;
+        }
     }
     else
     {
-        log_msg("Failed to create IPv%d socket: %s\n", version, strerror(errno));
+        info.descriptor = socket(version == 4 ? PF_INET : PF_INET6, SOCK_DGRAM, IPPROTO_UDP);
     }
+    if(info.descriptor < 0)
+    {
+        goto error;
+    }
+    info.protocol = version == 4 ? AF_INET : AF_INET6;
+    info.type = SOCKET_TYPE_QUERY;
+    buffer_t *buffer = version == 4 ? &context.sockets.interfaces4 : &context.sockets.interfaces6;
+    buffer->data = safe_realloc(buffer->data, (buffer->len + 1) * sizeof(info));
+    ((socket_info_t*)buffer->data)[buffer->len++] = info;
+    set_rcvbuf(info.descriptor);
+    set_sndbuf(info.descriptor);
+    return;
+
+    error:
+        log_msg("Failed to create IPv%d socket: %s\n", version, strerror(errno));
 }
 
 void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
@@ -519,10 +535,10 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         struct sockaddr_storage* addr = element->data;
         socket_info_t info;
         info.descriptor = socket(addr->ss_family, SOCK_DGRAM, IPPROTO_UDP);
-        info.protocol = addr->ss_family;
-        info.type = SOCKET_TYPE_QUERY;
         if(info.descriptor >= 0)
         {
+            info.protocol = addr->ss_family;
+            info.type = SOCKET_TYPE_QUERY;
             if(bind(info.descriptor, (struct sockaddr*)addr, sizeof(*addr)) != 0)
             {
                 log_msg("Not adding socket %s due to bind failure: %s\n", sockaddr2str(addr), strerror(errno));
@@ -733,7 +749,8 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
 
 void send_query(lookup_t *lookup)
 {
-    static uint8_t query_buffer[0x200];
+    static uint8_t buffer[0x200];
+    uint8_t *query_buffer = buffer;
 
     // Choose random resolver
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
@@ -773,6 +790,11 @@ void send_query(lookup_t *lookup)
         lookup->socket = ((socket_info_t *) interfaces->data) + socket_index;
     }
 
+    if(context.srcrand.enabled && lookup->resolver->address.ss_family == AF_INET6)
+    {
+       query_buffer += 48;
+    }
+
     ssize_t result = dns_question_create_from_name(query_buffer, &lookup->key.name, lookup->key.type,
                                                    lookup->transaction);
     if (result < DNS_PACKET_MINIMUM_SIZE)
@@ -783,10 +805,32 @@ void send_query(lookup_t *lookup)
 
     // Set or unset the QD bit based on user preference
     dns_buf_set_rd(query_buffer, !context.cmd_args.norecurse);
+    struct sockaddr *dst = (struct sockaddr *)&lookup->resolver->address;
+    struct sockaddr_in6 dst_buffer;
+
+
+    if(context.srcrand.enabled && lookup->resolver->address.ss_family == AF_INET6)
+    {
+        struct sockaddr_in6* addr = (struct sockaddr_in6*)&context.srcrand.src_range;
+        uint8_t prefix = addr->sin6_port;
+        uint8_t random_trailing_bytes = (128 - prefix) / 8;
+        if(random_trailing_bytes < 16)
+        {
+            uint8_t random_byte;
+            urandom_get(&random_byte, sizeof(random_byte));
+            uint16_t random_bits = (128 - prefix) % 8;
+            addr->sin6_addr.s6_addr[16 - random_trailing_bytes - 1] ^= (random_byte & ((1 << random_bits) - 1));
+        }
+        urandom_get(16 - random_trailing_bytes + addr->sin6_addr.s6_addr, random_trailing_bytes);
+        dst_buffer = *((struct sockaddr_in6*)&lookup->resolver->address);
+        dst_buffer.sin6_port = 0;
+        dst = (struct sockaddr*)&dst_buffer;
+        write_raw_header(buffer, (size_t)result, &context.srcrand.src_range, &lookup->resolver->address);
+        result += 48;
+    }
     
     errno = 0;
-    ssize_t sent = sendto(lookup->socket->descriptor, query_buffer, (size_t) result, 0,
-                          (struct sockaddr *) &lookup->resolver->address,
+    ssize_t sent = sendto(lookup->socket->descriptor, buffer, (size_t) result, 0,dst,
                           sockaddr_storage_size(&lookup->resolver->address));
     if(sent != result)
     {
@@ -1463,14 +1507,28 @@ void pcap_can_read()
 }
 #endif
 
+uint8_t *handle_incoming_raw(socket_info_t *info, uint8_t *readbuf, ssize_t *num_received, struct sockaddr *recvaddr)
+{
+    if(!context.srcrand.enabled || info->protocol != AF_INET6)
+    {
+        return readbuf;
+    }
+
+    ((struct sockaddr_in6*)recvaddr)->sin6_port = *((uint16_t*)readbuf);
+
+    *num_received -= 8;
+    return readbuf + 8;
+}
+
 void can_read(socket_info_t *info)
 {
     static uint8_t readbuf[0xFFFF];
     static struct sockaddr_storage recvaddr;
     static socklen_t fromlen;
     static ssize_t num_received;
+    uint8_t *payload_buf;
 
-
+    payload_buf = readbuf;
 
     fromlen = sizeof(recvaddr);
     num_received = recvfrom(info->descriptor, readbuf, sizeof(readbuf), 0, (struct sockaddr *) &recvaddr, &fromlen);
@@ -1478,7 +1536,13 @@ void can_read(socket_info_t *info)
     {
         return;
     }
-    do_read(readbuf, (size_t)num_received, &recvaddr);
+
+    payload_buf = handle_incoming_raw(info, readbuf, &num_received, (struct sockaddr *) &recvaddr);
+    if(payload_buf == NULL)
+    {
+        return;
+    }
+    do_read(payload_buf, (size_t)num_received, &recvaddr);
     auto_concurrency_handle(NULL);
 }
 
@@ -1789,6 +1853,12 @@ void run()
     if(!urandom_init())
     {
         log_msg("Failed to open /dev/urandom: %s\n", strerror(errno));
+        clean_exit(EXIT_FAILURE);
+    }
+
+    if(context.srcrand.enabled && (context.cmd_args.bind_addrs4.count > 0 || context.cmd_args.bind_addrs6.count > 0))
+    {
+        log_msg("--bindto and --rand-src-ipv6 cannot be used together\n");
         clean_exit(EXIT_FAILURE);
     }
 
@@ -2166,6 +2236,37 @@ void parse_cmd(int argc, char **argv)
             }
             single_list_push_back(addr->ss_family == AF_INET ? &context.cmd_args.bind_addrs4 :
                                   &context.cmd_args.bind_addrs6, addr);
+        }
+        else if (strcmp(argv[i], "--rand-src-ipv6") == 0)
+        {
+            expect_arg(i);
+            if(context.srcrand.enabled)
+            {
+                log_msg("--rand-src-ipv6 can only be used once\n");
+                clean_exit(EXIT_FAILURE);
+            }
+            char *save_ptr = argv[++i];
+            char *tok = strtok_r(save_ptr, "/", &save_ptr);
+            if(tok != NULL)
+            {
+                tok = strtok_r(save_ptr, "/", &save_ptr);
+            }
+            if(tok == NULL || inet_pton(AF_INET6, argv[i], &((struct sockaddr_in6*)&context.srcrand.src_range)->sin6_addr) != 1)
+            {
+                log_msg("Invalid --rand-src-ipv6\n");
+                clean_exit(EXIT_FAILURE);
+            }
+            struct sockaddr_in6* addr = (struct sockaddr_in6*)&context.srcrand.src_range;
+            int prefix = atoi(tok);
+            if(prefix <= 0 || prefix > 128)
+            {
+                log_msg("Invalid --rand-src-ipv6\n");
+                clean_exit(EXIT_FAILURE);
+            }
+            context.srcrand.enabled = true;
+
+            // We abuse the port field to hold the prefix length.
+            addr->sin6_port = prefix;
         }
         else if (strcmp(argv[i], "--outfile") == 0 || strcmp(argv[i], "-w") == 0)
         {

@@ -215,6 +215,12 @@ typedef struct
     timed_ring_t ring; // handles timeouts
     size_t lookup_index;
     size_t fork_index;
+    struct {
+        bool enabled;
+        buffer_t ranges4;
+        buffer_t ranges6;
+        struct sockaddr_storage src_range;
+    } srcrand;
     struct
     {
         struct timespec start_time;

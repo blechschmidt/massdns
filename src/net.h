@@ -8,6 +8,8 @@
 #include <net/if.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 #ifdef PCAP_SUPPORT
     #include <sys/ioctl.h>
 #endif
@@ -188,6 +190,103 @@ const char* ip2ptr(const char *qname)
         return ptr_query;
     }
     return NULL;
+}
+
+// Source: http://www.microhowto.info/howto/calculate_an_internet_protocol_checksum_in_c.html
+uint16_t ip_checksum(void* vdata,size_t length)
+{
+    // Cast the data pointer to one that can be indexed.
+    char* data=(char*)vdata;
+
+    // Initialise the accumulator.
+    uint64_t acc=0xffff;
+
+    // Handle any partial block at the start of the data.
+    unsigned int offset=((uintptr_t)data)&3;
+    if (offset)
+    {
+        size_t count=4-offset;
+        if (count>length) count=length;
+        uint32_t word=0;
+        memcpy(offset+(char*)&word,data,count);
+        acc+=ntohl(word);
+        data+=count;
+        length-=count;
+    }
+
+    // Handle any complete 32-bit blocks.
+    char* data_end=data+(length&~3);
+    while (data!=data_end)
+    {
+        uint32_t word;
+        memcpy(&word,data,4);
+        acc+=ntohl(word);
+        data+=4;
+    }
+    length&=3;
+
+    // Handle any partial block at the end of the data.
+    if (length)
+    {
+        uint32_t word=0;
+        memcpy(&word,data,length);
+        acc+=ntohl(word);
+    }
+
+    // Handle deferred carries.
+    acc=(acc&0xffffffff)+(acc>>32);
+    while (acc>>16)
+    {
+        acc=(acc&0xffff)+(acc>>16);
+    }
+
+    // If the data began at an odd byte address
+    // then reverse the byte order to compensate.
+    if (offset&1)
+    {
+        acc=((acc&0xff00)>>8)|((acc&0x00ff)<<8);
+    }
+
+    // Return the checksum in network byte order.
+    return htons(~acc);
+}
+
+ssize_t write_raw_header(uint8_t *buf, uint16_t payload_size, struct sockaddr_storage *src, struct sockaddr_storage *dst)
+{
+    buf[0] = 0;
+    buf[1] = 0;
+    buf[2] = 0;
+    buf[3] = 0;
+
+    // length
+    *((uint16_t*)(buf + 4)) = htons(payload_size + 8);
+
+    // To compute the checksum over the pseudo header more efficiently, some fields are swapped and some fields are
+    // only filled in after checksum computation. This saves us a copy into a dedicated pseudo header buf.
+
+    // next header
+    buf[6] = 0;
+    // hop limit
+    buf[7] = 17; // 17 is UDP
+
+    struct sockaddr_in6* src_range = (struct sockaddr_in6*)src;
+    struct sockaddr_in6* dst_addr = (struct sockaddr_in6*)dst;
+    memcpy(buf + 8, src_range->sin6_addr.s6_addr, 16);
+    memcpy(buf + 24, dst_addr->sin6_addr.s6_addr, 16);
+
+    // TODO: Remove hard-coded port by having a socket block some port.
+    *((uint16_t*)(buf + 40)) = htons(666);
+    *((uint16_t*)(buf + 42)) = dst_addr->sin6_port;
+    *((uint16_t*)(buf + 44)) = htons(payload_size + 8);
+    *((uint16_t*)(buf + 46)) = htons(0);
+
+    *((uint16_t*)(buf + 46)) = ip_checksum(buf, payload_size + 48);
+
+    buf[0] = 6 << 4;
+    buf[6] = 17;
+    buf[7] = 255;
+
+    return payload_size + 48;
 }
 
 #ifdef PCAP_SUPPORT
