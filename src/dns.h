@@ -1623,4 +1623,88 @@ void dns_print_packet(FILE *f, dns_pkt_t *packet, uint8_t *begin, size_t len, ui
     fprintf(f, "\n\n");
 }
 
+uint8_t dns_ip_octet2label(uint8_t *dst, uint8_t octet)
+{
+    uint8_t length = octet >= 100 ? 3 : (octet >= 10 ? 2 : 1);
+    for(uint8_t i = 0; i < length; i++)
+    {
+        uint8_t digit = octet % 10;
+        dst[length - 1 - i] = (char)('0' + digit);
+        octet /= 10;
+    }
+    return length;
+}
+
+bool dns_ip2ptr(const char *qname, dns_name_t *name)
+{
+    static char *hexchars = "0123456789abcdef";
+    struct sockaddr_storage ptr_addr_storage;
+
+    if (inet_pton(AF_INET, qname, &((struct sockaddr_in*)&ptr_addr_storage)->sin_addr) == 1)
+    {
+        name->length = 0;
+        uint8_t *addr = (uint8_t*)&((struct sockaddr_in*)&ptr_addr_storage)->sin_addr.s_addr;
+#define ipv4b2l(INDEX) name->name[name->length] = dns_ip_octet2label(name->name + name->length + 1, addr[(INDEX)]); \
+        name->length += name->name[name->length] + 1;
+        ipv4b2l(3);
+        ipv4b2l(2);
+        ipv4b2l(1);
+        ipv4b2l(0);
+        name->name[name->length++] = 7;
+        name->name[name->length++] = 'i';
+        name->name[name->length++] = 'n';
+        name->name[name->length++] = '-';
+        name->name[name->length++] = 'a';
+        name->name[name->length++] = 'd';
+        name->name[name->length++] = 'd';
+        name->name[name->length++] = 'r';
+        name->name[name->length++] = 4;
+        name->name[name->length++] = 'a';
+        name->name[name->length++] = 'r';
+        name->name[name->length++] = 'p';
+        name->name[name->length++] = 'a';
+        name->name[name->length++] = 0;
+
+        return true;
+    }
+    else if (inet_pton(AF_INET6, qname, &((struct sockaddr_in6*)&ptr_addr_storage)->sin6_addr) == 1)
+    {
+        uint8_t *addr = (uint8_t*)&((struct sockaddr_in6*)&ptr_addr_storage)->sin6_addr.s6_addr;
+#define ipv6b2l(INDEX) name->name[(INDEX) * 4 + 0] = 1; \
+    name->name[(INDEX) * 4 + 1] = hexchars[addr[15 - (INDEX)] & 0xF]; \
+    name->name[(INDEX) * 4 + 2] = 1; \
+    name->name[(INDEX) * 4 + 3] = hexchars[(addr[15 - (INDEX)] >> 4) & 0xF];
+
+        ipv6b2l(0);
+        ipv6b2l(1);
+        ipv6b2l(2);
+        ipv6b2l(3);
+        ipv6b2l(4);
+        ipv6b2l(5);
+        ipv6b2l(6);
+        ipv6b2l(7);
+        ipv6b2l(8);
+        ipv6b2l(9);
+        ipv6b2l(10);
+        ipv6b2l(11);
+        ipv6b2l(12);
+        ipv6b2l(13);
+        ipv6b2l(14);
+        ipv6b2l(15);
+        name->name[64] = 3;
+        name->name[65] = 'i';
+        name->name[66] = 'p';
+        name->name[67] = '6';
+        name->name[68] = 4;
+        name->name[69] = 'a';
+        name->name[70] = 'r';
+        name->name[71] = 'p';
+        name->name[72] = 'a';
+        name->name[73] = 0;
+        name->length = 74;
+        return true;
+    }
+    return false;
+}
+
 #endif //MASSRESOLVER_DNS_H
