@@ -199,7 +199,7 @@ Specifying ports (using a colon, together with square brackets in case of IPv6 a
 By default, DNS port 53 will be used.
 
 .TP
-.B \-r \-\-retry
+.B \-\-retry
 .br
 This option specifies the DNS response codes that are considered a failure and cause a lookup to be retried. By default,
 \fBmassdns\fP will retry lookups for all responses without NOERROR or NXDOMAIN response code. As soon as this option is
@@ -212,7 +212,7 @@ This option accepts DNS response codes in textual or numeric format. Additionall
 reasonable setting when working with reliable, trusted resolvers.
 
 .TP
-.B \-r \-\-root
+.B \-\-root
 .br
 Do not drop the privileges when running as root. For security reasons, using this option is not recommended.
 
