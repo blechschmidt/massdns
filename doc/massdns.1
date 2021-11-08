@@ -139,8 +139,8 @@ This output mode is not customizable and outputs all successful responses in the
 .TP
 F - \fBbinary output\fP
 .br
-The uncustomizable binary format is not formally specified but follows from the source code. The repository includes a
-\fIdnsparse.py\fP script that is kept up to date with the binary format as output by \fBmassdns\fP.
+The uncustomizable binary format has no binding specification but follows from the source code. The repository includes
+a \fIdnsparse.py\fP script that is kept up to date with the binary format as output by \fBmassdns\fP.
 
 .TP
 J - \fBNDJSON (new\-line delimited JSON)\fP
@@ -177,6 +177,14 @@ shared\-nothing approach.
 .B \-\-quiet
 .br
 When this option is specified, \fBmassdns\fP will not print progress stats and it will not display some warnings.
+
+.TP
+.B \-\-rand-src-ipv6
+.br
+When this option is supplied with an IPv6 format in CIDR notation, \fBmassdns\fP will use a raw UDP socket for IPv6
+resolvers. For each query, a random IP address from the subnet is used. This allows to bypass rate limits for some
+public IPv6 resolvers. This will only work if your machine is provided with a routed prefix and can use addresses from
+within its prefix without neighbor discovery.
 
 .TP
 .B \-\-rcvbuf

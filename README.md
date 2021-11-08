@@ -34,6 +34,7 @@ Usage: ./bin/massdns [options] [domainlist]
       --predictable      Use resolvers incrementally. Useful for resolver tests.
       --processes        Number of processes to be used for resolving. (Default: 1)
   -q  --quiet            Quiet mode.
+      --rand-src-ipv6    Use a random IPv6 address from the specified subnet for each query.
       --rcvbuf           Size of the receive buffer in bytes.
       --retry            Unacceptable DNS response codes.
                          (Default: All codes but NOERROR or NXDOMAIN)
@@ -74,7 +75,7 @@ Advanced flags for the ndjson output mode:
   e - Write a record for each terminal query failure.
 ```
 
-This overview may be incomplete. For more options, especially concerning output formatting, use `--help`.
+For a detailed description of the command line interface, please consult the man page using `man ./doc/massdns.1`.
 
 ### Example
 Resolve all AAAA records from domains within domains.txt using the resolvers within `resolvers.txt` in `lists` and

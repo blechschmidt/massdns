@@ -61,6 +61,7 @@ void print_help()
                     "      --predictable      Use resolvers incrementally. Useful for resolver tests.\n"
                     "      --processes        Number of processes to be used for resolving. (Default: 1)\n"
                     "  -q  --quiet            Quiet mode.\n"
+                    "      --rand-src-ipv6    Use a random IPv6 address from the specified subnet for each query.\n"
                     "      --rcvbuf           Size of the receive buffer in bytes.\n"
                     "      --retry            Unacceptable DNS response codes.\n"
                     "                         (Default: All codes but NOERROR or NXDOMAIN)\n"
