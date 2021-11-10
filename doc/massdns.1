@@ -124,17 +124,53 @@ L - \fBlist output\fP
 .br
 Only output the query names of response packets, i.e. effectively only output domains.
 
+.IP
+Advanced output flags:
+.br
+\fB0\fP - By default, the list output mode will only output query names of packets that have at least one answer record.
+When this flag is enabled, the list output will also output NOERROR packets without answers. This is particularly
+useful for performing subdomain enumeration against some nameservers, where a NOERROR code might give away that another
+record type than the queried one exists for the DNS name.
+
+
 .TP
 S - \fBsimple text output\fP
 .br
 Due to the multitude of advanced flags that have accumulated over time, the "simple text output" has become less simple.
 It now supports many flags that allow for an advanced customization of the output. Really, you should probably use JSON
-instead.
+instead. By default, this output mode outputs all response records of all DNS sections. Each record will be on a
+separate line.
+
+.IP
+Advanced output flags:
+.br
+\fBd\fP - Include records from the additional section. As the simple text output outputs records from all sections by
+default, specifying this flag causes only record sections to be printed that are explicitly specified by advanced
+flags.
+
+\fBi\fP - Indent resource records with a tab. This is especially useful when the DNS question is printed.
+
+\fBm\fP - Only output resource records that match the question name.
+
+\fBn\fP - Include records from the answer section. This option works analogously to the \fBd\fP option.
+
+\fBq\fP - Instead of only outputting resource records, also output the DNS question.
+
+\fBr\fP - Print the question with resolver IP address, Unix timestamp and response code prepended. This flag implies
+the \fBq\fP flag.
+
+\fBs\fP - Print an additional newline character after each DNS packet.
+
+\fBt\fP - Include TTL and record class within the output.
+
+\fBu\fP - \fBn\fP - Include records from the authority section. This option works analogously to the \fBd\fP option.
+
 
 .TP
 F - \fBfull text output\fP
 .br
 This output mode is not customizable and outputs all successful responses in the style of the \fBdig\fP tool.
+
 
 .TP
 F - \fBbinary output\fP
@@ -142,13 +178,18 @@ F - \fBbinary output\fP
 The uncustomizable binary format has no binding specification but follows from the source code. The repository includes
 a \fIdnsparse.py\fP script that is kept up to date with the binary format as output by \fBmassdns\fP.
 
+
 .TP
 J - \fBNDJSON (new\-line delimited JSON)\fP
 .br
-Each line will contain a JSON object.
-.% TODO: Be more precise
+This output causes each response packet to be printed as a JSON object.
 
-.% TODO: Add advanced output flags for all classes
+.IP
+Advanced output flags:
+.br
+\fBe\fP - Instead of only writing JSON objects for successful resolves, also write a record for each terminal failure,
+such as a final timeout or a final unacceptable response code.
+.RE
 
 .RE
 
