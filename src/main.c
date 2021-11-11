@@ -2384,12 +2384,15 @@ void parse_cmd(int argc, char **argv)
                         {
                             case 'u':
                                 context.format.sections[DNS_SECTION_AUTHORITY] = true;
+                                context.format.sections_explicit = true;
                                 break;
                             case 'd':
                                 context.format.sections[DNS_SECTION_ADDITIONAL] = true;
+                                context.format.sections_explicit = true;
                                 break;
                             case 'n':
                                 context.format.sections[DNS_SECTION_ANSWER] = true;
+                                context.format.sections_explicit = true;
                                 break;
                             case 'm':
                                 context.format.match_name = true;
@@ -2418,6 +2421,12 @@ void parse_cmd(int argc, char **argv)
                                 clean_exit(EXIT_FAILURE);
                         }
                     }
+
+                    if(!context.format.sections_explicit)
+                    {
+                        context.format.sections[DNS_SECTION_ANSWER] = true;
+                    }
+
                     break;
 
                 case 'F':

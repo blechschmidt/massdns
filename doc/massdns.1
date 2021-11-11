@@ -138,15 +138,17 @@ S - \fBsimple text output\fP
 .br
 Due to the multitude of advanced flags that have accumulated over time, the "simple text output" has become less simple.
 It now supports many flags that allow for an advanced customization of the output. Really, you should probably use JSON
-instead. By default, this output mode outputs all response records of all DNS sections. Each record will be on a
-separate line.
+instead. By default, this output mode outputs all resource records of the DNS answer section that match the question
+name. Each record will be on a separate line. If any advanced output flag has been specified, this output mode will also
+print resource records that do not match the question name, unless specified otherwise by the advanced output flag
+\fBm\fP.
 
 .IP
 Advanced output flags:
 .br
-\fBd\fP - Include records from the additional section. As the simple text output outputs records from all sections by
-default, specifying this flag causes only record sections to be printed that are explicitly specified by advanced
-flags.
+\fBd\fP - Include records from the additional section. As the simple text output outputs records from the answer section
+by default, enabling this flag will only output records from the additional section, unless the output of records from
+other sections is explicitly turned on.
 
 \fBi\fP - Indent resource records with a tab. This is especially useful when the DNS question is printed.
 
@@ -163,7 +165,7 @@ the \fBq\fP flag.
 
 \fBt\fP - Include TTL and record class within the output.
 
-\fBu\fP - \fBn\fP - Include records from the authority section. This option works analogously to the \fBd\fP option.
+\fBu\fP - Include records from the authority section. This option works analogously to the \fBd\fP option.
 
 
 .TP

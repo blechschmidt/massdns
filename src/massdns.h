@@ -148,6 +148,7 @@ typedef struct
         bool write_exhausted_tries;
         bool list_write_zero_answers;
         bool only_with_answers_or_referrals;
+        bool sections_explicit;
     } format;
 
     struct cmd_args
