@@ -1,0 +1,3 @@
+one.one.one.one
+google-public-dns-a.google.com 0.0.0.0 0.0.0.0 8.8.4.4
+google-public-dns-b.google.com 0.0.0.0 0.0.0.0 1.1.1.1
