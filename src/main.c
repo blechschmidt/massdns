@@ -1093,6 +1093,7 @@ void can_send()
     while (hashmapSize(context.map) < min(context.cmd_args.hashmap_size, concurrency_state.current_concurrency)
         && context.state <= STATE_QUERYING)
     {
+        dedicated_resolvers = NULL;
         if(!next_query(&qname, &dedicated_resolvers, &rtype))
         {
             if(hashmapSize(context.map) <= 0)
