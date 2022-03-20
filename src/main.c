@@ -61,7 +61,9 @@ void print_help()
                     "      --predictable      Use resolvers incrementally. Useful for resolver tests.\n"
                     "      --processes        Number of processes to be used for resolving. (Default: 1)\n"
                     "  -q  --quiet            Quiet mode.\n"
+#ifdef IPV6_HDRINCL
                     "      --rand-src-ipv6    Use a random IPv6 address from the specified subnet for each query.\n"
+#endif
                     "      --rcvbuf           Size of the receive buffer in bytes.\n"
                     "      --retry            Unacceptable DNS response codes.\n"
                     "                         (Default: All codes but NOERROR or NXDOMAIN)\n"
@@ -494,6 +496,7 @@ void add_default_socket(int version)
 {
     socket_info_t info;
 
+#ifdef IPV6_HDRINCL
     if(context.srcrand.enabled && version == 6)
     {
         if((info.descriptor = socket(PF_INET6, SOCK_RAW, IPPROTO_UDP)) < 0)
@@ -507,6 +510,7 @@ void add_default_socket(int version)
         }
     }
     else
+#endif
     {
         info.descriptor = socket(version == 4 ? PF_INET : PF_INET6, SOCK_DGRAM, IPPROTO_UDP);
     }
@@ -2232,6 +2236,7 @@ void parse_cmd(int argc, char **argv)
             single_list_push_back(addr->ss_family == AF_INET ? &context.cmd_args.bind_addrs4 :
                                   &context.cmd_args.bind_addrs6, addr);
         }
+#ifdef IPV6_HDRINCL
         else if (strcmp(argv[i], "--rand-src-ipv6") == 0)
         {
             expect_arg(i);
@@ -2263,6 +2268,7 @@ void parse_cmd(int argc, char **argv)
             // We abuse the port field to hold the prefix length.
             addr->sin6_port = prefix;
         }
+#endif
         else if (strcmp(argv[i], "--outfile") == 0 || strcmp(argv[i], "-w") == 0)
         {
             expect_arg(i);
