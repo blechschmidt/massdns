@@ -1358,7 +1358,23 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                     fputs(json_buffer, context.outfile);
                     fprintf(context.outfile, "\"}");
                 }
-                fprintf(context.outfile, "%s},\"resolver\":\"%s\"}\n", section_emitted ? "]" : "",
+
+
+
+                fprintf(context.outfile, "%s},\"flags\":[", section_emitted ? "]" : "");
+                static char json_flags[64];
+                int written = sprintf(json_flags, "%s%s%s%s%s%s",
+                        packet.head.header.aa ? "\"aa\"," : "",
+                        packet.head.header.tc ? "\"tc\"," : "",
+                        packet.head.header.rd ? "\"rd\"," : "",
+                        packet.head.header.ra ? "\"ra\"," : "",
+                        packet.head.header.ad ? "\"ad\"," : "",
+                        packet.head.header.cd ? "\"cd\"," : "");
+                if(written > 0)
+                {
+                    json_flags[written - 1] = 0;
+                }
+                fprintf(context.outfile, "%s],\"resolver\":\"%s\"}\n", json_flags,
                         sockaddr2str(recvaddr));
 
                 break;

@@ -45,6 +45,7 @@ typedef enum
     DNS_REC_NSEC = 47,
     DNS_REC_NSEC3 = 50,
     DNS_REC_NSEC3PARAM = 51,
+    DNS_REC_SMIMEA = 53,
     DNS_REC_OPENPGPKEY = 61,
     DNS_REC_SVCB = 64,
     DNS_REC_HTTPS = 65,
@@ -332,6 +333,12 @@ dns_record_type dns_str_to_record_type(const char *str)
                     if (tolower(str[2]) == 'g' && tolower(str[3]) == 0)
                     {
                         return DNS_REC_SIG;
+                    }
+                    return DNS_REC_INVALID;
+                case 'm':
+                    if (tolower(str[2]) == 'i' && tolower(str[3]) == 'm' && tolower(str[4]) == 'e' && tolower(str[5]) == 'a' && str[6] == 0)
+                    {
+                        return DNS_REC_SMIMEA;
                     }
                     return DNS_REC_INVALID;
                 case 'o':
@@ -1583,7 +1590,7 @@ void dns_print_packet(FILE *f, dns_pkt_t *packet, uint8_t *begin, size_t len, ui
 
     fprintf(f,
              ";; ->>HEADER<<- opcode: %s, status: %s, id: %"PRIu16"\n"
-             ";; flags: %s%s%s%s%s; QUERY: %" PRIu16 ", ANSWER: %" PRIu16 ", AUTHORITY: %" PRIu16 ", ADDITIONAL: %" PRIu16 "\n\n"
+             ";; flags: %s%s%s%s%s%s%s; QUERY: %" PRIu16 ", ANSWER: %" PRIu16 ", AUTHORITY: %" PRIu16 ", ADDITIONAL: %" PRIu16 "\n\n"
              ";; QUESTION SECTION:\n",
              dns_opcode2str((dns_opcode)packet->head.header.opcode),
              dns_rcode2str((dns_rcode)packet->head.header.rcode),
@@ -1593,6 +1600,8 @@ void dns_print_packet(FILE *f, dns_pkt_t *packet, uint8_t *begin, size_t len, ui
              packet->head.header.aa ? "aa " : "",
              packet->head.header.rd ? "rd " : "",
              packet->head.header.ra ? "ra " : "",
+             packet->head.header.tc ? "tc " : "",
+             packet->head.header.cd ? "cd " : "",
              packet->head.header.q_count,
              packet->head.header.ans_count,
              packet->head.header.auth_count,
