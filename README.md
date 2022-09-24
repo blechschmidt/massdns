@@ -116,7 +116,7 @@ The repository includes the file `resolvers.txt` consisting of a filtered subset
 Please note that the usage of MassDNS may cause a significant load on the used resolvers and result in abuse complaints being sent to your ISP.
 Also note that the provided resolvers are not guaranteed to be trustworthy. The resolver list is currently outdated with a large share of resolvers being dysfunctional.
 
-MassDNS's DNS implementation is currently very sporadic and only supports the most common records. You are welcome to help changing this by collaborating.
+MassDNS's custom, malloc-free DNS implementation currently only supports the most common records. You are welcome to help changing this by collaborating.
 
 #### PTR records
 MassDNS includes a Python script allowing you to resolve all IPv4 PTR records by printing their respective queries to the standard output.
