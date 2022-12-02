@@ -26,15 +26,8 @@
 #include <limits.h>
 #include <stdarg.h>
 
-#ifdef PCAP_SUPPORT
-#include <net/ethernet.h>
-#include <netinet/ip.h>
-#include <netinet/ip6.h>
-#include <netinet/udp.h>
-#include <net/if.h>
-#endif
-
 static char json_buffer[5 * 0xFFFF];
+static uint8_t packet_buffer[0x20000];
 
 void print_help()
 {
@@ -75,9 +68,6 @@ void print_help()
                     "      --sticky           Do not switch the resolver when retrying.\n"
                     "      --socket-count     Socket count per process. (Default: 1)\n"
                     "  -t  --type             Record type to be resolved. (Default: A)\n"
-#ifdef PCAP_SUPPORT
-                    "      --use-pcap         Enable pcap usage.\n"
-#endif
                     "      --verify-ip        Verify IP addresses of incoming replies.\n"
                     "  -w  --outfile          Write to the specified output file instead of standard output.\n"
                     "\n"
@@ -189,12 +179,6 @@ static const char* stats_fmt_json =
 
 void cleanup()
 {
-#ifdef PCAP_SUPPORT
-    if(context.pcap != NULL)
-    {
-        pcap_close(context.pcap);
-    }
-#endif
     free(context.cmd_args.record_types);
 
     if(context.map)
@@ -213,6 +197,9 @@ void cleanup()
 
     free(context.sockets.interfaces4.data);
     free(context.sockets.interfaces6.data);
+    free(context.sockets.raw_send4.data);
+    free(context.sockets.raw_send6.data);
+    free(context.sockets.raw_receive.data);
 
     urandom_close();
 
@@ -248,7 +235,10 @@ void cleanup()
     free(context.done);
 }
 
-void log_msg(const char* format, ...)
+// Allow the compiler to optimize out the logging
+#define log_msg(loglevel, ...) if((loglevel) >= LOGLEVEL) log_msg_helper(__VA_ARGS__)
+
+void log_msg_helper(const char* format, ...)
 {
     if(context.logfile != stderr)
     {
@@ -299,7 +289,7 @@ int hash_address(void *param)
     }
     else
     {
-        log_msg("Unsupported address for hashing.\n");
+        log_msg(LOG_ERROR, "Unsupported address for hashing.\n");
         abort();
     }
 
@@ -336,13 +326,23 @@ bool addresses_equal(void *param1, void *param2)
     }
 }
 
+void resolver_set_sender_addr(resolver_t *resolver)
+{
+    if(!context.cmd_args.tcp_raw)
+    {
+        return;
+    }
+    socklen_t local_addr_size = sizeof(resolver->source_addr);
+    get_local_addr(&resolver->address, &resolver->source_addr, &local_addr_size);
+}
+
 buffer_t massdns_resolvers_from_file(char *filename)
 {
     char line[4096];
     FILE *f = fopen(filename, "r");
     if (f == NULL)
     {
-        log_msg("Failed to open resolver file: %s\n", strerror(errno));
+        log_msg(LOG_ERROR, "Failed to open resolver file: %s\n", strerror(errno));
         clean_exit(EXIT_FAILURE);
     }
     single_list_t *list = single_list_new();
@@ -359,15 +359,16 @@ buffer_t massdns_resolvers_from_file(char *filename)
                     || (addr->ss_family == AF_INET6 && context.sockets.interfaces6.len > 0))
                 {
                     single_list_push_back(list, resolver);
+                    resolver_set_sender_addr(resolver);
                 }
                 else
                 {
-                    log_msg("No query socket for resolver \"%s\" found.\n", line);
+                    log_msg(LOG_ERROR, "No query socket for resolver \"%s\" found.\n", line);
                 }
             }
             else
             {
-                log_msg("\"%s\" is not a valid resolver. Skipped.\n", line);
+                log_msg(LOG_ERROR, "\"%s\" is not a valid resolver. Skipped.\n", line);
             }
         }
     }
@@ -375,7 +376,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
     buffer_t resolvers = single_list_to_array_copy(list, sizeof(resolver_t));
     if(single_list_count(list) == 0)
     {
-        log_msg("No usable resolvers were found. Terminating.\n");
+        log_msg(LOG_ERROR, "No usable resolvers were found. Terminating.\n");
         clean_exit(EXIT_FAILURE);
     }
 
@@ -384,7 +385,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
         context.resolver_map = hashmapCreate(resolvers.len, hash_address, addresses_equal);
         if(!context.resolver_map)
         {
-            log_msg("Failed to create resolver lookup map: %s\n", strerror(errno));
+            log_msg(LOG_ERROR, "Failed to create resolver lookup map: %s\n", strerror(errno));
             abort();
         }
 
@@ -396,7 +397,7 @@ buffer_t massdns_resolvers_from_file(char *filename)
             hashmapPut(context.resolver_map, &resolver->address, resolver);
             if (errno != 0)
             {
-                log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
+                log_msg(LOG_ERROR, "Error putting resolver into hashmap: %s\n", strerror(errno));
                 abort();
             }
         }
@@ -455,19 +456,20 @@ void resolvers_from_line(char *line, char **qname, dedicated_resolvers_t **resol
                     hashmapPut(context.resolver_map, &resolver->address, resolver);
                     if (errno != 0)
                     {
-                        log_msg("Error putting resolver into hashmap: %s\n", strerror(errno));
+                        log_msg(LOG_ERROR, "Error putting resolver into hashmap: %s\n", strerror(errno));
                         abort();
                     }
                 }
+                resolver_set_sender_addr(resolver);
             }
             else
             {
-                log_msg("No query socket for dedicated resolver \"%s\" found.\n", token);
+                log_msg(LOG_ERROR, "No query socket for dedicated resolver \"%s\" found.\n", token);
             }
         }
         else
         {
-            log_msg("\"%s\" is not a valid resolver. Skipped.\n", token);
+            log_msg(LOG_ERROR, "\"%s\" is not a valid resolver. Skipped.\n", token);
         }
     }
     extend_resolver_buffer(resolvers, resolver_storage, i);
@@ -479,7 +481,7 @@ void set_sndbuf(int fd)
     if(context.cmd_args.sndbuf
         && setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &context.cmd_args.sndbuf, sizeof(context.cmd_args.sndbuf)) != 0)
     {
-        log_msg("Failed to adjust send buffer size: %s\n", strerror(errno));
+        log_msg(LOG_ERROR, "Failed to adjust send buffer size: %s\n", strerror(errno));
     }
 }
 
@@ -488,7 +490,7 @@ void set_rcvbuf(int fd)
     if(context.cmd_args.rcvbuf
         && setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &context.cmd_args.rcvbuf, sizeof(context.cmd_args.rcvbuf)) != 0)
     {
-        log_msg("Failed to adjust receive buffer size: %s\n", strerror(errno));
+        log_msg(LOG_ERROR, "Failed to adjust receive buffer size: %s\n", strerror(errno));
     }
 }
 
@@ -518,7 +520,7 @@ void add_default_socket(int version)
     {
         goto error;
     }
-    info.protocol = version == 4 ? AF_INET : AF_INET6;
+    info.family = version == 4 ? AF_INET : AF_INET6;
     info.type = SOCKET_TYPE_QUERY;
     buffer_t *buffer = version == 4 ? &context.sockets.interfaces4 : &context.sockets.interfaces6;
     buffer->data = safe_realloc(buffer->data, (buffer->len + 1) * sizeof(info));
@@ -528,7 +530,7 @@ void add_default_socket(int version)
     return;
 
     error:
-        log_msg("Failed to create IPv%d socket: %s\n", version, strerror(errno));
+        log_msg(LOG_ERROR, "Failed to create IPv%d socket: %s\n", version, strerror(errno));
 }
 
 void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
@@ -542,11 +544,11 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         info.descriptor = socket(addr->ss_family, SOCK_DGRAM, IPPROTO_UDP);
         if(info.descriptor >= 0)
         {
-            info.protocol = addr->ss_family;
+            info.family = addr->ss_family;
             info.type = SOCKET_TYPE_QUERY;
             if(bind(info.descriptor, (struct sockaddr*)addr, sizeof(*addr)) != 0)
             {
-                log_msg("Not adding socket %s due to bind failure: %s\n", sockaddr2str(addr), strerror(errno));
+                log_msg(LOG_ERROR, "Not adding socket %s due to bind failure: %s\n", sockaddr2str(addr), strerror(errno));
             }
             else
             {
@@ -557,7 +559,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         }
         else
         {
-            log_msg("Failed to create IPv%d socket: %s\n", info.protocol, strerror(errno));
+            log_msg(LOG_ERROR, "Failed to create IPv%d socket: %s\n", info.family, strerror(errno));
         }
         free(element->data);
     }
@@ -565,6 +567,50 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
     *buffer = single_list_to_array_copy(&sockets, sizeof(socket_info_t));
     single_list_clear(&sockets);
 }
+
+
+void tcp_raw_add_sender_socket(int version)
+{
+    socket_info_t info;
+    info.descriptor = socket(version == 4 ? PF_INET : PF_INET6, SOCK_RAW, IPPROTO_RAW);
+    if(info.descriptor < 0)
+    {
+        goto error;
+    }
+    info.family = version == 4 ? AF_INET : AF_INET6;
+    info.type = SOCKET_TYPE_TCP_RAW_SENDER;
+    buffer_t *buffer = version == 4 ? &context.sockets.raw_send4 : &context.sockets.raw_send6;
+    buffer->data = safe_realloc(buffer->data, (buffer->len + 1) * sizeof(info));
+    ((socket_info_t*)buffer->data)[buffer->len++] = info;
+    set_rcvbuf(info.descriptor);
+    set_sndbuf(info.descriptor);
+    return;
+
+    error:
+    log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw socket: %s\n", version, strerror(errno));
+}
+
+void tcp_raw_add_receiver_socket(int version)
+{
+    socket_info_t info;
+    info.descriptor = socket(AF_PACKET, SOCK_DGRAM, htons(version == 4 ? ETH_P_IP : ETH_P_IPV6));
+    if(info.descriptor < 0)
+    {
+        goto error;
+    }
+    info.family = AF_PACKET;
+    info.type = SOCKET_TYPE_TCP_RAW_RECEIVER;
+    buffer_t *buffer = &context.sockets.raw_receive;
+    buffer->data = safe_realloc(buffer->data, (buffer->len + 1) * sizeof(info));
+    ((socket_info_t*)buffer->data)[buffer->len++] = info;
+    set_rcvbuf(info.descriptor);
+    set_sndbuf(info.descriptor);
+    return;
+
+    error:
+    log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw socket: %s\n", version, strerror(errno));
+}
+
 
 void query_sockets_setup()
 {
@@ -574,6 +620,14 @@ void query_sockets_setup()
         {
             add_default_socket(4);
             add_default_socket(6);
+        }
+
+        if(context.cmd_args.tcp_raw)
+        {
+            tcp_raw_add_sender_socket(4);
+            tcp_raw_add_sender_socket(6);
+            tcp_raw_add_receiver_socket(4);
+            tcp_raw_add_receiver_socket(6);
         }
     }
     else
@@ -589,6 +643,7 @@ bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_r
     static size_t line_index = 0;
     static char* last_qname = NULL;
     static dedicated_resolvers_t *last_dedicated_resolvers = NULL;
+    char *name = line;
 
     context.cmd_args.record_type_index %= context.cmd_args.record_type_count;
     *rtype = context.cmd_args.record_types[context.cmd_args.record_type_index];
@@ -614,13 +669,24 @@ bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_r
             continue;
         }
         trim_end(line);
-        if (*line == 0)
+
+
+        char *tok;
+        dns_record_type qtype;
+        if((tok = strtok(line, "\t ")) && (qtype = dns_str_to_record_type(line)) != DNS_REC_INVALID)
+        {
+            name = line + strlen(tok) + 1;
+            *rtype = qtype;
+        }
+
+        if (*name == 0)
         {
             continue;
         }
+
         if (context.cmd_args.extended_input)
         {
-            resolvers_from_line(line, qname, dedicated_resolvers);
+            resolvers_from_line(name, qname, dedicated_resolvers);
             if (*qname == NULL)
             {
                 continue;
@@ -630,7 +696,7 @@ bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_r
         }
         else
         {
-            *qname = line;
+            *qname = name;
         }
         last_qname = *qname;
         return true;
@@ -658,19 +724,6 @@ int hash_lookup_key(void *key)
 void end_warmup()
 {
     context.state = STATE_QUERYING;
-    if(!context.cmd_args.busypoll)
-    {
-        // Reduce our CPU load from epoll interrupts by removing the EPOLLOUT event
-#ifdef PCAP_SUPPORT
-        if(!context.pcap)
-#endif
-#ifdef HAVE_EPOLL
-        {
-            add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces4);
-            add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_MOD, &context.sockets.interfaces6);
-        }
-#endif
-    }
 }
 
 void lookup_cleanup_dedicated_resolvers(lookup_t *lookup)
@@ -685,17 +738,18 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
 {
     if(context.lookup_pool.len == 0)
     {
-        log_msg("Empty lookup pool.\n");
+        log_msg(LOG_ERROR, "Empty lookup pool.\n");
         clean_exit(EXIT_FAILURE);
     }
     lookup_t *lookup = ((lookup_t**)context.lookup_pool.data)[--context.lookup_pool.len];
+    bzero(lookup, sizeof(*lookup));
 
     if(type != DNS_REC_PTR || !dns_ip2ptr(qname, &lookup->key.name))
     {
         ssize_t name_length = dns_str2namebuf(qname, lookup->key.name.name);
         if(name_length < 0)
         {
-            log_msg("Illegal DNS name: %s\n", qname);
+            log_msg(LOG_ERROR, "Illegal DNS name: %s\n", qname);
             goto fail;
         }
         else
@@ -707,17 +761,9 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     lookup->key.type = type;
     if(hashmapGet(context.map, &lookup->key) != NULL)
     {
-        log_msg("Duplicate DNS name: %s\n", qname);
+        log_msg(LOG_ERROR, "Duplicate DNS name: %s\n", qname);
         goto fail;
     }
-    //bzero(value, sizeof(*value));
-    lookup->resolver = NULL;
-    lookup->dedicated_resolvers = NULL;
-    lookup->socket = NULL;
-    lookup->transaction = 0;
-    lookup->dedicated_resolver_index = 0;
-    lookup->ring_entry = NULL;
-    lookup->tries = 0;
 
     lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
     urandom_get(&lookup->transaction, sizeof(lookup->transaction));
@@ -726,8 +772,13 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     hashmapPut(context.map, &lookup->key, lookup);
     if(errno != 0)
     {
-        log_msg("Error putting lookup into hashmap: %s\n", strerror(errno));
+        log_msg(LOG_ERROR, "Error putting lookup into hashmap: %s\n", strerror(errno));
         abort();
+    }
+
+    if(context.cmd_args.tcp_only)
+    {
+        lookup->use_tcp = true;
     }
 
     context.lookup_index++;
@@ -746,11 +797,211 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     return NULL;
 }
 
-void send_query(lookup_t *lookup)
+void tcp_close(lookup_t *lookup)
 {
-    static uint8_t buffer[0x200];
-    uint8_t *query_buffer = buffer;
+    if(!lookup->use_tcp || lookup->tcp_socket.descriptor <= 0)
+    {
+        return;
+    }
+    epoll_ctl(context.epollfd, EPOLL_CTL_DEL, lookup->tcp_socket.descriptor, NULL);
+    close(lookup->tcp_socket.descriptor);
+    lookup->tcp_state.received = 0;
+    lookup->tcp_socket.descriptor = -1;
+}
 
+void tcp_cleanup(lookup_t *lookup)
+{
+    free(lookup->tcp_state.buffer);
+    lookup->tcp_state.buffer = NULL;
+    tcp_data_tracker_free(lookup->tcp_state.window_tracker);
+    lookup->tcp_state.window_tracker = NULL;
+}
+
+void timeout_reset(lookup_t *lookup)
+{
+    timed_ring_remove(&context.ring, lookup->ring_entry);
+    lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
+}
+
+void tcp_connected(socket_info_t *socket_info)
+{
+    lookup_t *lookup = socket_info->data;
+    int tcp_socket = socket_info->descriptor;
+
+    log_msg(LOG_DEBUG, "TCP connected (%s).\n", dns_name2str(&lookup->key.name));
+
+    timeout_reset(lookup);
+
+    uint16_t qlen = dns_question_create_from_name(packet_buffer + 2, &lookup->key.name, lookup->key.type,
+                                                  lookup->transaction);
+    dns_buf_set_rd(packet_buffer + 2, !context.cmd_args.norecurse);
+    *((uint16_t*)packet_buffer) = htons(qlen);
+
+    struct epoll_event ev;
+    bzero(&ev, sizeof(ev));
+    ev.data.ptr = &lookup->tcp_socket;
+    ev.events = EPOLLIN;
+    epoll_ctl(context.epollfd, EPOLL_CTL_MOD, tcp_socket, &ev);
+
+    if(send(tcp_socket, packet_buffer, qlen + 2, MSG_NOSIGNAL) < qlen + 2)
+    {
+        log_msg(LOG_ERROR, "TCP written too few bytes for qname %s.\n", dns_name2str(&lookup->key.name));
+    }
+    shutdown(tcp_socket, SHUT_WR);
+}
+
+void srcrand_random_addr(struct sockaddr_in6 *addr)
+{
+    memcpy(addr, &context.srcrand.src_range, sizeof(*addr));
+    uint8_t prefix = addr->sin6_port;
+    uint8_t random_trailing_bytes = (128 - prefix) / 8;
+    if(random_trailing_bytes < 16)
+    {
+        uint8_t random_byte;
+        urandom_get(&random_byte, sizeof(random_byte));
+        uint16_t random_bits = (128 - prefix) % 8;
+        addr->sin6_addr.s6_addr[16 - random_trailing_bytes - 1] ^= (random_byte & ((1 << random_bits) - 1));
+    }
+    urandom_get(16 - random_trailing_bytes + addr->sin6_addr.s6_addr, random_trailing_bytes);
+}
+
+int tcp_raw_get_fd(lookup_t *lookup)
+{
+    buffer_t *iface = (lookup->resolver->address.ss_family == AF_INET ? &context.sockets.raw_send4 : &context.sockets.raw_send6);
+    return ((socket_info_t *) iface->data)->descriptor;
+}
+
+void sendto_raw(int fd, const void *message, size_t length, int flags, const struct sockaddr *dest_addr, socklen_t destlen)
+{
+    uint16_t port = 0;
+    if(dest_addr->sa_family == AF_INET6)
+    {
+        port = ((struct sockaddr_in6 *) dest_addr)->sin6_port;
+        ((struct sockaddr_in6 *) dest_addr)->sin6_port = 0;
+    }
+
+    // Raw sockets will return EINVAL for IPv6 socket addresses with port != 0 for some reason.
+    sendto(fd, message, length, 0, dest_addr,
+           sockaddr_storage_size((struct sockaddr_storage*)dest_addr));
+
+    if(dest_addr->sa_family == AF_INET6)
+    {
+        ((struct sockaddr_in6 *) dest_addr)->sin6_port = port;
+    }
+}
+
+void tcp_raw_connected(lookup_t *lookup)
+{
+    timeout_reset(lookup);
+
+    uint8_t *payload_offset = packet_buffer + TCPIP_HEADER_MAX_SIZE;
+    uint16_t qlen = dns_question_create_from_name(payload_offset + 2, &lookup->key.name, lookup->key.type,
+                                                  lookup->transaction);
+    dns_buf_set_rd(payload_offset + 2, !context.cmd_args.norecurse);
+    *((uint16_t*)payload_offset) = htons(qlen);
+    log_msg(LOG_DEBUG, "TCP connected: %s, %"PRIu16"\n", dns_name2str(&lookup->key.name), qlen);
+
+    uint32_t seqnum = (lookup - context.lookup_space) << 9 | 1;
+    uint16_t tcpip_header_size = tcpip_raw_write(payload_offset, qlen + 2, (struct sockaddr *)&lookup->tcp_state.src_addr,
+                                                 (struct sockaddr*)&lookup->resolver->address,
+                                                 seqnum, lookup->tcp_state.ack, 0x10);
+    uint8_t *ip_header = payload_offset - tcpip_header_size;
+    sendto_raw(tcp_raw_get_fd(lookup), ip_header, tcpip_header_size + qlen + 2, MSG_NOSIGNAL, (struct sockaddr *)&lookup->resolver->address,
+           sockaddr_storage_size(&lookup->resolver->address));
+}
+
+void tcp_raw_connect(lookup_t *lookup)
+{
+    struct sockaddr* src_addr = (struct sockaddr*)&lookup->resolver->source_addr;
+    lookup->tcp_state.src_addr = lookup->resolver->source_addr;
+
+    if(context.srcrand.enabled && lookup->resolver->address.ss_family == AF_INET6)
+    {
+        srcrand_random_addr((struct sockaddr_in6*)&lookup->tcp_state.src_addr);
+        src_addr = (struct sockaddr*)&lookup->tcp_state.src_addr;
+    }
+
+    uint16_t src_port = ++lookup->resolver->next_src_port;
+    urandom_get(&src_port, sizeof(src_port));
+    set_sockaddr_port(src_addr, src_port);
+    set_sockaddr_port((struct sockaddr*)&lookup->tcp_state.src_addr, src_port);
+
+    uint8_t *payload_offset = packet_buffer + TCPIP_HEADER_MAX_SIZE;
+    uint32_t seqnum = (lookup - context.lookup_space) << 9;
+    uint16_t tcpip_header_size = tcpip_raw_write(payload_offset, 0, src_addr,
+                                                         (struct sockaddr*)&lookup->resolver->address,
+                                                                 seqnum, 0, 0x02);
+    uint8_t *ip_header = payload_offset - tcpip_header_size;
+
+    // Raw sockets will return EINVAL for IPv6 socket addresses with port != 0 for some reason.
+    sendto_raw(tcp_raw_get_fd(lookup), ip_header, tcpip_header_size, 0, (struct sockaddr *)&lookup->resolver->address,
+           sockaddr_storage_size(&lookup->resolver->address));
+
+
+    timeout_reset(lookup);
+}
+
+void tcp_connect(lookup_t *lookup)
+{
+    if(context.cmd_args.tcp_raw)
+    {
+        tcp_raw_connect(lookup);
+        return;
+    }
+    int tcp_socket = socket(lookup->resolver->address.ss_family, SOCK_STREAM, 0);
+    if(tcp_socket < 0)
+    {
+        log_msg(LOG_ERROR, "Failed to create TCP socket: %s\n", strerror(errno));
+        return;
+    }
+
+    // Make socket non-blocking
+    int flags = fcntl(tcp_socket, F_GETFL, 0);
+    fcntl(tcp_socket, F_SETFL, flags | O_NONBLOCK);
+
+    if(context.srcrand.enabled && lookup->resolver->address.ss_family == AF_INET6)
+    {
+        const int enable = 1;
+        if (setsockopt(tcp_socket, SOL_IP, IP_FREEBIND, &enable, sizeof(enable)) == 0)
+        {
+            struct sockaddr_in6 src_addr;
+            srcrand_random_addr(&src_addr);
+            if(bind(tcp_socket, &src_addr, sizeof(src_addr)) != 0)
+            {
+                log_msg(LOG_ERROR, "Failed to bind TCP socket: %s\n", strerror(errno));
+            }
+        }
+        else
+        {
+            log_msg(LOG_ERROR, "Failed to set FREEBIND option on TCP socket: %s\n", strerror(errno));
+        }
+    }
+
+    connect(tcp_socket, (struct sockaddr*)&lookup->resolver->address, sockaddr_storage_size(&lookup->resolver->address));
+
+    log_msg(LOG_DEBUG, "TCP connect for %s.\n", dns_name2str(&lookup->key.name));
+
+    timeout_reset(lookup);
+
+    bzero(&lookup->tcp_socket, sizeof(lookup->tcp_socket));
+    lookup->tcp_socket.descriptor = tcp_socket;
+    lookup->tcp_socket.type = SOCKET_TYPE_QUERY_TCP;
+    lookup->tcp_socket.data = lookup;
+    if(lookup->tcp_state.buffer == NULL)
+    {
+        lookup->tcp_state.buffer = safe_malloc(0x10001);
+    }
+    lookup->tcp_state.received = 0;
+
+    struct epoll_event ev;
+    bzero(&ev, sizeof(ev));
+    ev.data.ptr = &lookup->tcp_socket;
+    ev.events = EPOLLIN | EPOLLOUT;
+    epoll_ctl(context.epollfd, EPOLL_CTL_ADD, tcp_socket, &ev);
+}
+
+void pick_resolver(lookup_t *lookup)
+{
     // Choose random resolver
     // Pool of resolvers cannot be empty due to check after parsing resolvers.
     if(!context.cmd_args.sticky || lookup->resolver == NULL)
@@ -769,6 +1020,20 @@ void send_query(lookup_t *lookup)
             lookup->resolver = ((resolver_t *) context.resolvers.data) + urandom_size_t() % context.resolvers.len;
         }
     }
+}
+
+void send_query(lookup_t *lookup)
+{
+    uint8_t *query_buffer = packet_buffer;
+
+    pick_resolver(lookup);
+
+    if(lookup->use_tcp)
+    {
+        tcp_close(lookup);
+        tcp_connect(lookup);
+        return;
+    }
 
     // We need to select the correct socket pool: IPv4 socket pool for IPv4 resolver/IPv6 socket pool for IPv6 resolver
     buffer_t *interfaces;
@@ -781,7 +1046,7 @@ void send_query(lookup_t *lookup)
         interfaces = &context.sockets.interfaces6;
     }
 
-    if(lookup->socket == NULL || lookup->socket->protocol != lookup->resolver->address.ss_family)
+    if(lookup->socket == NULL || lookup->socket->family != lookup->resolver->address.ss_family)
     {
         // Pick a random socket from that pool
         // Pool of sockets cannot be empty due to check when parsing resolvers. Socket creation must have succeeded.
@@ -794,13 +1059,8 @@ void send_query(lookup_t *lookup)
        query_buffer += 48;
     }
 
-    ssize_t result = dns_question_create_from_name(query_buffer, &lookup->key.name, lookup->key.type,
-                                                   lookup->transaction);
-    if (result < DNS_PACKET_MINIMUM_SIZE)
-    {
-        log_msg("Failed to create DNS question for query \"%s\".", dns_name2str(&lookup->key.name));
-        return;
-    }
+    uint16_t qlen = dns_question_create_from_name(query_buffer, &lookup->key.name, lookup->key.type,
+                                                lookup->transaction);
 
     // Set or unset the QD bit based on user preference
     dns_buf_set_rd(query_buffer, !context.cmd_args.norecurse);
@@ -810,32 +1070,22 @@ void send_query(lookup_t *lookup)
 
     if(context.srcrand.enabled && lookup->resolver->address.ss_family == AF_INET6)
     {
-        struct sockaddr_in6* addr = (struct sockaddr_in6*)&context.srcrand.src_range;
-        uint8_t prefix = addr->sin6_port;
-        uint8_t random_trailing_bytes = (128 - prefix) / 8;
-        if(random_trailing_bytes < 16)
-        {
-            uint8_t random_byte;
-            urandom_get(&random_byte, sizeof(random_byte));
-            uint16_t random_bits = (128 - prefix) % 8;
-            addr->sin6_addr.s6_addr[16 - random_trailing_bytes - 1] ^= (random_byte & ((1 << random_bits) - 1));
-        }
-        urandom_get(16 - random_trailing_bytes + addr->sin6_addr.s6_addr, random_trailing_bytes);
+        srcrand_random_addr((struct sockaddr_in6*)&context.srcrand.src_range);
         dst_buffer = *((struct sockaddr_in6*)&lookup->resolver->address);
         dst_buffer.sin6_port = 0;
         dst = (struct sockaddr*)&dst_buffer;
-        write_raw_header(buffer, (size_t)result, &context.srcrand.src_range, &lookup->resolver->address);
-        result += 48;
+        write_raw_header(packet_buffer, qlen, &context.srcrand.src_range, &lookup->resolver->address);
+        qlen += 48;
     }
     
     errno = 0;
-    ssize_t sent = sendto(lookup->socket->descriptor, buffer, (size_t) result, 0,dst,
+    ssize_t sent = sendto(lookup->socket->descriptor, packet_buffer, qlen, 0, dst,
                           sockaddr_storage_size(&lookup->resolver->address));
-    if(sent != result)
+    if(sent != qlen)
     {
         if(errno != EAGAIN && errno != EWOULDBLOCK)
         {
-            log_msg("Error sending: %s\n", strerror(errno));
+            log_msg(LOG_ERROR, "Error sending on FD %d for query %s: %s\n", lookup->socket->descriptor, dns_name2str(&lookup->key.name), strerror(errno));
         }
     }
 }
@@ -883,7 +1133,7 @@ void send_stats()
 
     if(write(context.sockets.write_pipe.descriptor, &stats_msg, sizeof(stats_msg)) != sizeof(stats_msg))
     {
-        log_msg("Could not send stats atomically.\n");
+        log_msg(LOG_ERROR, "Could not send stats atomically.\n");
     }
 }
 
@@ -1120,7 +1370,7 @@ bool is_unacceptable(dns_pkt_t *packet)
     return context.cmd_args.retry_codes[packet->head.header.rcode];
 }
 
-void write_exhausted_tries(lookup_t *lookup, char *status)
+void write_exhausted_tries(lookup_t *lookup, const char *status)
 {
     if(context.cmd_args.output == OUTPUT_NDJSON && context.format.write_exhausted_tries) {
         json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&lookup->key.name));
@@ -1133,6 +1383,12 @@ void write_exhausted_tries(lookup_t *lookup, char *status)
 void lookup_done(lookup_t *lookup)
 {
     context.stats.finished++;
+    lookup->tcp_state.terminated = true;
+
+    tcp_close(lookup);
+    tcp_cleanup(lookup);
+
+    timed_ring_remove(&context.ring, lookup->ring_entry);
 
     hashmapRemove(context.map, &lookup->key);
 
@@ -1150,16 +1406,22 @@ void lookup_done(lookup_t *lookup)
     }
 }
 
-bool retry(lookup_t *lookup)
+bool retry(lookup_t *lookup, lookup_failure_reason_t failure_reason)
 {
-    context.stats.timeouts[lookup->tries]--;
-    context.stats.timeouts[++lookup->tries]++;
+    if(failure_reason != LOOKUP_FAILURE_NOFAILURE)
+    {
+        context.stats.timeouts[lookup->tries]--;
+        context.stats.timeouts[++lookup->tries]++;
+    }
     if(lookup->tries < context.cmd_args.resolve_count)
     {
         lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
         send_query(lookup);
         return true;
     }
+    write_exhausted_tries(lookup, lookup_failure_text[failure_reason]);
+    // If this is the case, we will not try again.
+    lookup_done(lookup);
     return false;
 }
 
@@ -1175,14 +1437,10 @@ void ring_timeout(void *param)
 
     lookup_t *lookup = param;
     context.stats.numtimeouts++;
-    if(!retry(lookup))
-    {
-        write_exhausted_tries(lookup, "TIMEOUT");
-        lookup_done(lookup);
-    }
+    retry(lookup, LOOKUP_FAILURE_TIMEOUT);
 }
 
-void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
+void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr, int protocol)
 {
     static dns_pkt_t packet;
     static uint8_t *parse_offset;
@@ -1197,7 +1455,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         resolver = hashmapGet(context.resolver_map, recvaddr);
         if(resolver == NULL)
         {
-            //log_msg("Fake/NAT reply from %s\n", sockaddr2str(recvaddr));
+            //log_msg(LOG_ERROR, "Fake/NAT reply from %s\n", sockaddr2str(recvaddr));
             return;
         }
     }
@@ -1223,21 +1481,31 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         return;
     }
 
+    if(protocol == IPPROTO_UDP && lookup->use_tcp)
+    {
+        // We have already switched to TCP. Do not consider older UDP replies anymore.
+        return;
+    }
+
     timed_ring_remove(&context.ring, lookup->ring_entry); // Clear timeout trigger
 
     // Check whether we want to retry resending the packet
     if(is_unacceptable(&packet))
     {
         // We may have tried to many times already.
-        if(!retry(lookup))
-        {
-            write_exhausted_tries(lookup, "MAXRETRIES");
-            // If this is the case, we will not try again.
-            lookup_done(lookup);
-        }
+        retry(lookup, LOOKUP_FAILURE_MAXRETRIES);
     }
     else
     {
+        // The DNS truncated bit is set, which means that we should switch to TCP.
+        if(packet.head.header.tc && context.cmd_args.tcp_enabled)
+        {
+            log_msg(LOG_DEBUG, "Truncation. Switching %s to TCP\n", dns_name2str(&lookup->key.name));
+            lookup->use_tcp = true;
+            retry(lookup, LOOKUP_FAILURE_NOFAILURE);
+            return;
+        }
+
         // We are done with the lookup because we received an acceptable reply.
         context.stats.finished_success++;
         context.stats.final_rcodes[packet.head.header.rcode]++;
@@ -1374,8 +1642,8 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
                 {
                     json_flags[written - 1] = 0;
                 }
-                fprintf(context.outfile, "%s],\"resolver\":\"%s\"}\n", json_flags,
-                        sockaddr2str(recvaddr));
+                fprintf(context.outfile, "%s],\"resolver\":\"%s\",\"proto\":\"%s\"}\n", json_flags,
+                        sockaddr2str(recvaddr), lookup->use_tcp ? "TCP" : "UDP");
 
                 break;
 
@@ -1463,7 +1731,7 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
         }
 
         lookup_done(lookup);
-        
+
         // Sometimes, users may want to obtain results immediately.
         if(context.cmd_args.flush)
         {
@@ -1472,60 +1740,183 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr)
     }
 }
 
-#ifdef PCAP_SUPPORT
-void pcap_callback(u_char *arg, const struct pcap_pkthdr *header, const u_char *packet)
+void tcp_raw_ack(lookup_t *lookup, bool reset)
 {
-    static struct sockaddr_storage addr;
-    static size_t len;
-    static const uint8_t *frame;
-    static ssize_t remaining;
+    uint32_t acknum = lookup->tcp_state.ack;
+    // struct tcp_data_tacker *ack_info = tcp_window_tracker_find(lookup->tcp_state.window_tracker, NULL, 0, TCP_TRACKER_SEARCH_MODE_EXACT);
+    struct tcp_data_tacker *ack_info = lookup->tcp_state.window_tracker;
+    if(ack_info != NULL && ack_info->offset == 0)
+    {
+        acknum += ack_info->end + 1;
+    }
 
-    // We expect at least an Ethernet header + IPv4/IPv6 header (>= 20) + UDP header
-    if(header->len < 42)
+    struct sockaddr* src_addr = (struct sockaddr*)&lookup->tcp_state.src_addr;
+
+    uint8_t flags = reset ? 0x04 : 0x10;
+
+    if(reset)
+    {
+        log_msg(LOG_DEBUG, "Send TCP RST for %s\n", dns_name2str(&lookup->key.name));
+    }
+
+    uint8_t *payload_offset = packet_buffer + TCPIP_HEADER_MAX_SIZE;
+    uint32_t seqnum = ((lookup - context.lookup_space) << 9) | (3 + dns_question_size(&lookup->key.name));
+    uint16_t tcpip_header_size = tcpip_raw_write(payload_offset, 0, src_addr,
+                                                 (struct sockaddr*)&lookup->resolver->address,
+                                                 seqnum, acknum, flags);
+    uint8_t *ip_header = payload_offset - tcpip_header_size;
+    sendto_raw(tcp_raw_get_fd(lookup), ip_header, tcpip_header_size, MSG_NOSIGNAL, (struct sockaddr *)&lookup->resolver->address,
+           sockaddr_storage_size(&lookup->resolver->address));
+}
+
+void tcp_raw_can_read(lookup_t *lookup, uint8_t *payload, uint16_t payload_size, size_t offset, struct sockaddr_storage *src_addr)
+{
+    if(payload_size == 0)
+    {
+        tcp_raw_ack(lookup, false);
+        return;
+    }
+    timeout_reset(lookup);
+    if(lookup->tcp_state.buffer == NULL)
+    {
+        lookup->tcp_state.buffer = safe_malloc(0x10001);
+    }
+    if(offset + payload_size > 0x10001)
     {
         return;
     }
-    frame = ((uint8_t*)packet) + 14;
-    remaining = header->len - 14;
+    memcpy(lookup->tcp_state.buffer + offset, payload, payload_size);
+    tcp_data_tracker_add_data(&lookup->tcp_state.window_tracker, offset, offset + payload_size - 1);
 
-    if(((struct ether_header*)packet)->ether_type == context.ether_type_ip)
+    if(lookup->tcp_state.window_tracker->offset == 0 && lookup->tcp_state.window_tracker->end >= 2
+       && lookup->tcp_state.window_tracker->end >= 1 + htons(*((uint16_t*)lookup->tcp_state.buffer))) {
+
+        // ACK before do_read function, which may modify the lookup.
+        tcp_raw_ack(lookup, true);
+
+        do_read(lookup->tcp_state.buffer + 2, lookup->tcp_state.window_tracker->end - 1, src_addr, IPPROTO_TCP);
+        return;
+    }
+
+    tcp_raw_ack(lookup, false);
+}
+
+void raw_receive_frame(socket_info_t *socket_info)
+{
+    ssize_t num_received = recv(socket_info->descriptor, packet_buffer, sizeof(packet_buffer), 0);
+    if(num_received < 20)
     {
-        unsigned int ip_hdr_len = ((struct iphdr *) frame)->ihl * 4;
-        remaining -= ip_hdr_len;
+        return;
+    }
 
-        // Check whether the packet is long enough to still contain a UDP frame
-        if(((struct iphdr *) frame)->protocol != 17
-            || remaining < 0)
+    uint8_t ip_version = packet_buffer[0] >> 4;
+    if(ip_version != 4 && ip_version != 6)
+    {
+        return;
+    }
+
+    uint16_t tot_len;
+    uint16_t tcp_hdr_offs;
+    struct sockaddr_storage src_addr;
+
+    if(ip_version == 4)
+    {
+        if(packet_buffer[9] != IPPROTO_TCP)
         {
             return;
         }
-        frame += ip_hdr_len;
-        len = (size_t)remaining;
-        remaining -= ntohs(((struct udphdr *) frame)->len);
-        if(remaining != 0)
-        {
-            return;
-        }
-        frame += 8;
-        addr.ss_family = AF_INET;
+        tot_len = ntohs(*((uint16_t*)(packet_buffer + 2)));
+        tcp_hdr_offs = (packet_buffer[0] & 0x0f) * 4;
+        src_addr.ss_family = AF_INET;
+        memcpy(&((struct sockaddr_in*)&src_addr)->sin_addr, packet_buffer + 12, 4);
     }
     else
     {
+        if(num_received < 40 || packet_buffer[6] != IPPROTO_TCP)
+        {
+            return;
+        }
+        tot_len = 40 + ntohs(*((uint16_t*)(packet_buffer + 4)));
+        tcp_hdr_offs = 40;
+        src_addr.ss_family = AF_INET6;
+        memcpy(&((struct sockaddr_in6*)&src_addr)->sin6_addr, packet_buffer + 8, 16);
+    }
+
+    if(num_received < tcp_hdr_offs + 20)
+    {
         return;
     }
-    do_read((uint8_t*)frame, len, &addr);
-    auto_concurrency_handle(NULL);
+    uint8_t *tcp_header = packet_buffer + tcp_hdr_offs;
+    uint8_t tcp_header_size = (tcp_header[12] >> 4) * 4;
+
+    size_t payload_offset = tcp_hdr_offs + tcp_header_size;
+    if(payload_offset > num_received || tot_len > num_received || payload_offset > tot_len)
+    {
+        return;
+    }
+    size_t payload_size = tot_len - payload_offset;
+
+    uint8_t flags = tcp_header[13];
+    uint16_t sport = ntohs(*((uint16_t*)(tcp_header + 0)));
+    uint16_t dport = ntohs(*((uint16_t*)(tcp_header + 2)));
+    uint32_t seqnum = ntohl(*((uint32_t*)(tcp_header + 4)));
+    uint32_t acknum = ntohl(*((uint32_t*)(tcp_header + 8)));
+    uint32_t lookup_index = acknum >> 9;
+    set_sockaddr_port((struct sockaddr*)&src_addr, sport);
+
+    lookup_t *lookup = &context.lookup_space[lookup_index % context.cmd_args.hashmap_size];
+    if(!lookup->use_tcp || get_sockaddr_port((struct sockaddr*)&lookup->tcp_state.src_addr) != dport
+            || !addresses_equal(&lookup->resolver->address, &src_addr)
+            || lookup->tcp_state.terminated)
+    {
+        return;
+    }
+
+    log_msg(LOG_DEBUG, "Incoming TCP frame for lookup %s: sport=%"PRIu16", dport=%"PRIu16", seqnum=%"PRIu32", acknum=%"PRIu32"\n",
+            dns_name2str(&lookup->key.name), sport, dport, seqnum, acknum);
+
+    if((flags & 0x12) == 0x12)
+    {
+        lookup->tcp_state.ack = seqnum + 1;
+
+        tcp_raw_connected(lookup);
+        return;
+    }
+
+    size_t offset = seqnum - lookup->tcp_state.ack;
+    uint8_t *payload = packet_buffer + payload_offset;
+    tcp_raw_can_read(lookup, payload, payload_size, offset, &src_addr);
 }
 
-void pcap_can_read()
+void tcp_can_read(socket_info_t *socket_info)
 {
-    pcap_dispatch(context.pcap, 1, pcap_callback, NULL);
+    lookup_t *lookup = socket_info->data;
+    int tcp_socket = socket_info->descriptor;
+    ssize_t numread = read(tcp_socket, lookup->tcp_state.buffer + lookup->tcp_state.received, 0x10001 - lookup->tcp_state.received);
+    if(numread <= 0)
+    {
+        return;
+    }
+
+    timeout_reset(lookup);
+
+    log_msg(LOG_DEBUG, "Read TCP %zu data for %s. Received: %zu\n", numread, dns_name2str(&lookup->key.name), lookup->tcp_state.received);
+
+    lookup->tcp_state.received += numread;
+    if(lookup->tcp_state.received < 2)
+    {
+        return;
+    }
+    uint16_t dns_len = htons(*((uint16_t*)lookup->tcp_state.buffer));
+    if(lookup->tcp_state.received >= dns_len + 2)
+    {
+        do_read(lookup->tcp_state.buffer + 2, dns_len, &lookup->resolver->address, IPPROTO_TCP);
+    }
 }
-#endif
 
 uint8_t *handle_incoming_raw(socket_info_t *info, uint8_t *readbuf, ssize_t *num_received, struct sockaddr *recvaddr)
 {
-    if(!context.srcrand.enabled || info->protocol != AF_INET6)
+    if(!context.srcrand.enabled || info->family != AF_INET6)
     {
         return readbuf;
     }
@@ -1558,7 +1949,7 @@ void can_read(socket_info_t *info)
     {
         return;
     }
-    do_read(payload_buf, (size_t)num_received, &recvaddr);
+    do_read(payload_buf, (size_t)num_received, &recvaddr, IPPROTO_UDP);
     auto_concurrency_handle(NULL);
 }
 
@@ -1648,12 +2039,12 @@ void privilege_drop()
         {
             if (!context.cmd_args.quiet)
             {
-                log_msg("Privileges have been dropped to \"%s:%s\" for security reasons.\n", username, groupname);
+                log_msg(LOG_INFO, "Privileges have been dropped to \"%s:%s\" for security reasons.\n", username, groupname);
             }
         }
         else
         {
-            log_msg("Privileges could not be dropped to \"%s:%s\".\n"
+            log_msg(LOG_ERROR, "Privileges could not be dropped to \"%s:%s\".\n"
                 "For security reasons, this program will only run as root user when supplied with --root, "
                 "which is not recommended.\n"
                 "It is better practice to run this program as a different user.\n", username, groupname);
@@ -1664,99 +2055,10 @@ void privilege_drop()
     {
         if (!context.cmd_args.quiet)
         {
-            log_msg("[WARNING] Privileges were not dropped. This is not recommended.\n");
+            log_msg(LOG_WARN, "[WARNING] Privileges were not dropped. This is not recommended.\n");
         }
     }
 }
-
-#ifdef PCAP_SUPPORT
-void pcap_setup()
-{
-    context.pcap_dev = pcap_lookupdev(context.pcap_error);
-    if(context.pcap_dev == NULL)
-    {
-        goto pcap_error;
-    }
-    log_msg("Default pcap device: %s", context.pcap_dev);
-
-
-    char mac_filter[sizeof("ether dst ") - 1 + MAC_READABLE_BUFLEN];
-    char *mac_readable = mac_filter + sizeof("ether dst ") - 1;
-    strcpy(mac_filter, "ether dst ");
-
-    if(get_iface_hw_addr_readable(context.pcap_dev, mac_readable) != 0)
-    {
-        log_msg("\nFailed to determine the hardware address of the device.\n");
-        goto pcap_error_noprint;
-    }
-    log_msg(", address: %s\n", mac_readable);
-
-
-    context.pcap = pcap_create(context.pcap_dev, context.pcap_error);
-    if(context.pcap == NULL)
-    {
-        goto pcap_error;
-    }
-
-    if(pcap_set_snaplen(context.pcap, 0xFFFF) != 0)
-    {
-        goto pcap_error;
-    }
-
-    if(pcap_setnonblock(context.pcap, 1, context.pcap_error) == -1)
-    {
-        goto pcap_error;
-    }
-
-    if(pcap_set_buffer_size(context.pcap, 1024 * 1024) != 0)
-    {
-        goto pcap_error;
-    }
-
-    int activation_status = pcap_activate(context.pcap);
-    if(activation_status != 0)
-    {
-        log_msg("Error during pcap activation: %s\n", pcap_statustostr(activation_status));
-        goto pcap_error_noprint;
-    }
-
-    if(pcap_compile(context.pcap, &context.pcap_filter, mac_filter, 0, PCAP_NETMASK_UNKNOWN) != 0)
-    {
-        log_msg("Error during pcap filter compilation: %s\n", pcap_geterr(context.pcap));
-        goto pcap_error_noprint;
-    }
-
-    if(pcap_setfilter(context.pcap, &context.pcap_filter) != 0)
-    {
-        log_msg("Error setting pcap filter: %s\n", pcap_geterr(context.pcap));
-        goto pcap_error_noprint;
-    }
-
-    context.pcap_info.descriptor = pcap_get_selectable_fd(context.pcap);
-    if(context.pcap_info.descriptor < 0)
-    {
-        goto pcap_error;
-    }
-#ifdef HAVE_EPOLL
-    struct epoll_event ev;
-    bzero(&ev, sizeof(ev));
-    ev.data.ptr = &context.pcap_info;
-    ev.events = EPOLLIN;
-    if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.pcap_info.descriptor, &ev) != 0)
-    {
-        log_msg("Failed to add epoll event: %s\n", strerror(errno));
-        clean_exit(EXIT_FAILURE);
-    }
-#endif
-    return;
-
-pcap_error:
-    log_msg("Error during pcap setup: %s\n", context.pcap_error);
-pcap_error_noprint:
-    cleanup();
-    clean_exit(EXIT_FAILURE);
-}
-#endif
 
 void init_pipes()
 {
@@ -1772,7 +2074,7 @@ void init_pipes()
     {
         if(pipe(context.sockets.pipes + i * 2) != 0)
         {
-            log_msg("Pipe failed: %s\n", strerror(errno));
+            log_msg(LOG_ERROR, "Pipe failed: %s\n", strerror(errno));
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1808,7 +2110,7 @@ void setup_pipes()
             ev.events = EPOLLIN;
             if (epoll_ctl(context.epollfd, EPOLL_CTL_ADD, context.sockets.master_pipes_read[i].descriptor, &ev) != 0)
             {
-                log_msg("Failed to add epoll event: %s\n", strerror(errno));
+                log_msg(LOG_ERROR, "Failed to add epoll event: %s\n", strerror(errno));
                 clean_exit(EXIT_FAILURE);
             }
 #endif
@@ -1841,7 +2143,7 @@ void read_control_message(socket_info_t *socket_info)
     ssize_t read_result = read(socket_info->descriptor, context.stat_messages + process, sizeof(stats_exchange_t));
     if(read_result > 0 && read_result < sizeof(stats_exchange_t))
     {
-        log_msg("Atomic read failed: Read %ld bytes.\n", read_result);
+        log_msg(LOG_ERROR, "Atomic read failed: Read %ld bytes.\n", read_result);
     }
     if(!context.done[process] && context.stat_messages[process].done)
     {
@@ -1868,20 +2170,20 @@ void run()
 
     if(!urandom_init())
     {
-        log_msg("Failed to open /dev/urandom: %s\n", strerror(errno));
+        log_msg(LOG_ERROR, "Failed to open /dev/urandom: %s\n", strerror(errno));
         clean_exit(EXIT_FAILURE);
     }
 
     if(context.srcrand.enabled && (context.cmd_args.bind_addrs4.count > 0 || context.cmd_args.bind_addrs6.count > 0))
     {
-        log_msg("--bindto and --rand-src-ipv6 cannot be used together\n");
+        log_msg(LOG_ERROR, "--bindto and --rand-src-ipv6 cannot be used together\n");
         clean_exit(EXIT_FAILURE);
     }
 
     context.map = hashmapCreate(context.cmd_args.hashmap_size, hash_lookup_key, cmp_lookup);
     if(context.map == NULL)
     {
-        log_msg("Failed to create hashmap.\n");
+        log_msg(LOG_ERROR, "Failed to create hashmap.\n");
         clean_exit(EXIT_FAILURE);
     }
 
@@ -1893,14 +2195,7 @@ void run()
         ((lookup_t**)context.lookup_pool.data)[i] = context.lookup_space + i;
     }
 
-    timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 1000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
-
-#ifdef HAVE_EPOLL
-    uint32_t socket_events = EPOLLOUT;
-
-    struct epoll_event pevents[100000];
-    bzero(pevents, sizeof(pevents));
-#endif
+    timed_ring_init(&context.ring, max(context.cmd_args.interval_ms, 10000), 2 * TIMED_RING_MS, context.cmd_args.timed_ring_buckets);
 
     init_pipes();
     context.pids = safe_calloc(context.cmd_args.num_processes * sizeof(*context.pids));
@@ -1910,18 +2205,6 @@ void run()
     if(!context.cmd_args.busypoll)
     {
         context.epollfd = epoll_create(1);
-    }
-#endif
-#ifdef PCAP_SUPPORT
-    if(context.cmd_args.use_pcap)
-    {
-        pcap_setup();
-    }
-    else
-#endif
-#ifdef HAVE_EPOLL
-    {
-        socket_events |= EPOLLIN;
     }
 #endif
     if(context.cmd_args.num_processes > 1)
@@ -1947,7 +2230,7 @@ void run()
         }
         if(!context.outfile)
         {
-            log_msg("Failed to open output file: %s\n", strerror(errno));
+            log_msg(LOG_ERROR, "Failed to open output file: %s\n", strerror(errno));
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1955,7 +2238,7 @@ void run()
     {
         if(context.cmd_args.num_processes > 1)
         {
-            log_msg("Multiprocessing is currently only supported through the -w parameter.\n");
+            log_msg(LOG_ERROR, "Multiprocessing is currently only supported through the -w parameter.\n");
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1965,7 +2248,7 @@ void run()
         context.domainfile = fopen(context.cmd_args.domains, "r");
         if (context.domainfile == NULL)
         {
-            log_msg("Failed to open domain file \"%s\".\n", context.cmd_args.domains);
+            log_msg(LOG_ERROR, "Failed to open domain file \"%s\".\n", context.cmd_args.domains);
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -1977,8 +2260,8 @@ void run()
 
 
     // It is important to call default interface sockets setup before reading the resolver list
-    // because that way we can warn if the socket creation for a certain IP protocol failed although a resolver
-    // requires the protocol.
+    // because that way we can warn if the socket creation for a certain IP family failed although a resolver
+    // requires the family.
     query_sockets_setup();
     context.resolvers = massdns_resolvers_from_file(context.cmd_args.resolvers);
 
@@ -1987,8 +2270,9 @@ void run()
 #ifdef HAVE_EPOLL
     if(!context.cmd_args.busypoll)
     {
-        add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces4);
-        add_sockets(context.epollfd, socket_events, EPOLL_CTL_ADD, &context.sockets.interfaces6);
+        add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_ADD, &context.sockets.interfaces4);
+        add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_ADD, &context.sockets.interfaces6);
+        add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_ADD, &context.sockets.raw_receive);
     }
 #endif
     if(context.cmd_args.busypoll)
@@ -2004,13 +2288,21 @@ void run()
     if(!context.cmd_args.busypoll)
     {
 #ifdef HAVE_EPOLL
+        struct epoll_event pevents[100000];
+        bzero(pevents, sizeof(pevents));
+
+        for(size_t i = 0; i < context.cmd_args.hashmap_size; i++)
+        {
+            can_send();
+        }
+
         while(context.state < STATE_DONE)
         {
 
             int ready = epoll_wait(context.epollfd, pevents, sizeof(pevents) / sizeof(pevents[0]), 1);
             if (ready < 0)
             {
-                log_msg("Epoll failure: %s\n", strerror(errno));
+                log_msg(LOG_ERROR, "Epoll failure: %s\n", strerror(errno));
             }
             else if (ready == 0) // Epoll timeout
             {
@@ -2021,6 +2313,18 @@ void run()
                 for (int i = 0; i < ready; i++)
                 {
                     socket_info_t *socket_info = pevents[i].data.ptr;
+                    if ((pevents[i].events & EPOLLOUT) && socket_info->type == SOCKET_TYPE_QUERY_TCP)
+                    {
+                        tcp_connected(socket_info);
+                    }
+                    if ((pevents[i].events & EPOLLIN) && socket_info->type == SOCKET_TYPE_QUERY_TCP)
+                    {
+                        tcp_can_read(socket_info);
+                    }
+                    if ((pevents[i].events & EPOLLIN) && socket_info->type == SOCKET_TYPE_TCP_RAW_RECEIVER)
+                    {
+                        raw_receive_frame(socket_info);
+                    }
                     if ((pevents[i].events & EPOLLOUT) && socket_info->type == SOCKET_TYPE_QUERY)
                     {
                         can_send();
@@ -2030,12 +2334,6 @@ void run()
                     {
                         can_read(socket_info);
                     }
-#ifdef PCAP_SUPPORT
-                        else if((pevents[i].events & EPOLLIN) && socket_info == &context.pcap_info)
-                        {
-                            pcap_can_read();
-                        }
-#endif
                     else if ((pevents[i].events & EPOLLIN) && socket_info->type == SOCKET_TYPE_CONTROL)
                     {
                         read_control_message(socket_info);
@@ -2094,7 +2392,7 @@ const char * get_status_format_string(char *arg) {
         if (!strcmp(arg, status_fmt_map[i].name))
             return status_fmt_map[i].status_fmt;
     }
-    log_msg("Invalid status format specified.\n");
+    log_msg(LOG_ERROR, "Invalid status format specified.\n");
     clean_exit(EXIT_FAILURE);
     return NULL;
 }
@@ -2103,7 +2401,7 @@ void use_stdin()
 {
     if (!context.cmd_args.quiet)
     {
-        log_msg("Reading domain list from stdin.\n");
+        log_msg(LOG_ERROR, "Reading domain list from stdin.\n");
     }
     context.domainfile = stdin;
 }
@@ -2133,12 +2431,6 @@ void parse_cmd(int argc, char **argv)
         print_help();
         clean_exit(EXIT_FAILURE);
     }
-
-#ifdef PCAP_SUPPORT
-    // Precompute values so we do not have to call htons for each incoming packet
-    context.ether_type_ip = htons(ETHERTYPE_IP);
-    context.ether_type_ip6 = htons(ETHERTYPE_IPV6);
-#endif
 
     context.domainfile_size = -1;
     context.state = STATE_WARMUP;
@@ -2172,6 +2464,20 @@ void parse_cmd(int argc, char **argv)
             print_help();
             clean_exit(EXIT_SUCCESS);
         }
+        else if (strcmp(argv[i], "--tcp-enabled") == 0)
+        {
+            context.cmd_args.tcp_enabled = true;
+        }
+        else if (strcmp(argv[i], "--tcp-only") == 0)
+        {
+            context.cmd_args.tcp_enabled = true;
+            context.cmd_args.tcp_only = true;
+        }
+        else if (strcmp(argv[i], "--tcp-raw") == 0)
+        {
+            context.cmd_args.tcp_enabled = true;
+            context.cmd_args.tcp_raw = true;
+        }
         else if (strcmp(argv[i], "--busypoll") == 0 || strcmp(argv[i], "--busy-poll") == 0)
         {
             context.cmd_args.busypoll = true;
@@ -2189,7 +2495,7 @@ void parse_cmd(int argc, char **argv)
             }
             else
             {
-                log_msg("Resolvers may only be supplied once.\n");
+                log_msg(LOG_ERROR, "Resolvers may only be supplied once.\n");
                 clean_exit(EXIT_FAILURE);
             }
         }
@@ -2213,7 +2519,7 @@ void parse_cmd(int argc, char **argv)
             }
             else
             {
-                log_msg("Invalid retry code: %s.\n", argv[i]);
+                log_msg(LOG_ERROR, "Invalid retry code: %s.\n", argv[i]);
                 clean_exit(EXIT_FAILURE);
             }
         }
@@ -2224,7 +2530,7 @@ void parse_cmd(int argc, char **argv)
 
             filter_mode_t filter_mode = strcmp(argv[i], "--ignore") == 0 ? FILTER_NEGATIVE : FILTER_POSITIVE;
             if(context.cmd_args.filter_mode != filter_mode && context.cmd_args.filter_mode != FILTER_DISABLED) {
-                log_msg("Cannot combine --filter and --ignore.\n");
+                log_msg(LOG_ERROR, "Cannot combine --filter and --ignore.\n");
                 clean_exit(EXIT_FAILURE);
             }
 
@@ -2235,7 +2541,7 @@ void parse_cmd(int argc, char **argv)
             }
             else
             {
-                log_msg("Invalid filter/ignore code: %s.\n", argv[i]);
+                log_msg(LOG_ERROR, "Invalid filter/ignore code: %s.\n", argv[i]);
                 clean_exit(EXIT_FAILURE);
             }
         }
@@ -2246,7 +2552,7 @@ void parse_cmd(int argc, char **argv)
             if (!str_to_addr(argv[++i], 0, addr))
             {
                 free(addr);
-                log_msg("Invalid address for socket binding: %s\n", argv[i]);
+                log_msg(LOG_ERROR, "Invalid address for socket binding: %s\n", argv[i]);
                 clean_exit(EXIT_FAILURE);
 
             }
@@ -2259,7 +2565,7 @@ void parse_cmd(int argc, char **argv)
             expect_arg(i);
             if(context.srcrand.enabled)
             {
-                log_msg("--rand-src-ipv6 can only be used once\n");
+                log_msg(LOG_ERROR, "--rand-src-ipv6 can only be used once\n");
                 clean_exit(EXIT_FAILURE);
             }
             char *save_ptr = argv[++i];
@@ -2270,20 +2576,21 @@ void parse_cmd(int argc, char **argv)
             }
             if(tok == NULL || inet_pton(AF_INET6, argv[i], &((struct sockaddr_in6*)&context.srcrand.src_range)->sin6_addr) != 1)
             {
-                log_msg("Invalid --rand-src-ipv6\n");
+                log_msg(LOG_ERROR, "Invalid --rand-src-ipv6\n");
                 clean_exit(EXIT_FAILURE);
             }
             struct sockaddr_in6* addr = (struct sockaddr_in6*)&context.srcrand.src_range;
             int prefix = atoi(tok);
             if(prefix <= 0 || prefix > 128)
             {
-                log_msg("Invalid --rand-src-ipv6\n");
+                log_msg(LOG_ERROR, "Invalid --rand-src-ipv6\n");
                 clean_exit(EXIT_FAILURE);
             }
             context.srcrand.enabled = true;
 
             // We abuse the port field to hold the prefix length.
             addr->sin6_port = prefix;
+            addr->sin6_family = AF_INET6;
         }
 #endif
         else if (strcmp(argv[i], "--outfile") == 0 || strcmp(argv[i], "-w") == 0)
@@ -2301,7 +2608,7 @@ void parse_cmd(int argc, char **argv)
                 context.logfile = fopen(filename, "w");
                 if(!context.logfile)
                 {
-                    log_msg("Failed to open log file: %s\n", strerror(errno));
+                    log_msg(LOG_ERROR, "Failed to open log file: %s\n", strerror(errno));
                     clean_exit(EXIT_FAILURE);
                 }
             }
@@ -2312,12 +2619,12 @@ void parse_cmd(int argc, char **argv)
             dns_record_type rtype = dns_str_to_record_type(argv[++i]);
             if (rtype == DNS_REC_INVALID)
             {
-                log_msg("Unsupported record type: %s\n", argv[i]);
+                log_msg(LOG_ERROR, "Unsupported record type: %s\n", argv[i]);
                 clean_exit(EXIT_FAILURE);
             }
             if (cmd_resolve_type(rtype))
             {
-                log_msg("Duplicate record type (%s) unsupported\n", argv[i]);
+                log_msg(LOG_ERROR, "Duplicate record type (%s) unsupported\n", argv[i]);
                 clean_exit(EXIT_FAILURE);
             }
 
@@ -2367,7 +2674,7 @@ void parse_cmd(int argc, char **argv)
                                 context.format.list_write_zero_answers = true;
                                 break;
                             default:
-                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                log_msg(LOG_ERROR, "Unrecognized output option: %c\n", *output_option);
                                 clean_exit(EXIT_FAILURE);
                         }
                     }
@@ -2387,7 +2694,7 @@ void parse_cmd(int argc, char **argv)
                                 context.format.write_exhausted_tries = true;
                                 break;
                             default:
-                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                log_msg(LOG_ERROR, "Unrecognized output option: %c\n", *output_option);
                                 clean_exit(EXIT_FAILURE);
                         }
                     }
@@ -2440,7 +2747,7 @@ void parse_cmd(int argc, char **argv)
                                 context.format.include_meta = true;
                                 break;
                             default:
-                                log_msg("Unrecognized output option: %c\n", *output_option);
+                                log_msg(LOG_ERROR, "Unrecognized output option: %c\n", *output_option);
                                 clean_exit(EXIT_FAILURE);
                         }
                     }
@@ -2457,16 +2764,10 @@ void parse_cmd(int argc, char **argv)
                     break;
 
                 default:
-                    log_msg("Unrecognized output format.\n");
+                    log_msg(LOG_ERROR, "Unrecognized output format.\n");
                     clean_exit(EXIT_FAILURE);
             }
         }
-#ifdef PCAP_SUPPORT
-        else if (strcmp(argv[i], "--use-pcap") == 0)
-        {
-            context.cmd_args.use_pcap = true;
-        }
-#endif
         else if (strcmp(argv[i], "--predictable") == 0)
         {
             context.cmd_args.predictable_resolver = true;
@@ -2502,13 +2803,13 @@ void parse_cmd(int argc, char **argv)
             if(context.cmd_args.num_processes == 0)
             {
 #ifndef HAVE_SYSINFO
-                    log_msg("No support for detecting the number of cores automatically.\n");
+                    log_msg(LOG_ERROR, "No support for detecting the number of cores automatically.\n");
                     clean_exit(EXIT_FAILURE);
 #else
                 int cores = get_nprocs_conf();
                 if(cores <= 0)
                 {
-                    log_msg("Failed to determine number of processor cores.\n");
+                    log_msg(LOG_ERROR, "Failed to determine number of processor cores.\n");
                     clean_exit(EXIT_FAILURE);
                 }
                 context.cmd_args.num_processes = (size_t)cores;
@@ -2564,7 +2865,7 @@ void parse_cmd(int argc, char **argv)
                     context.domainfile = fopen(context.cmd_args.domains, "r");
                     if (context.domainfile == NULL)
                     {
-                        log_msg("Failed to open domain file \"%s\".\n", argv[i]);
+                        log_msg(LOG_ERROR, "Failed to open domain file \"%s\".\n", argv[i]);
                         clean_exit(EXIT_FAILURE);
                     }
                     if(fseek(context.domainfile, 0, SEEK_END) != 0)
@@ -2587,7 +2888,7 @@ void parse_cmd(int argc, char **argv)
             }
             else
             {
-                log_msg("The domain list may only be supplied once.\n");
+                log_msg(LOG_ERROR, "The domain list may only be supplied once.\n");
                 clean_exit(EXIT_FAILURE);
             }
         }
@@ -2600,7 +2901,7 @@ void parse_cmd(int argc, char **argv)
     }
     if (context.cmd_args.resolvers == NULL)
     {
-        log_msg("Resolvers are required to be supplied.\n");
+        log_msg(LOG_ERROR, "Resolvers are required to be supplied.\n");
         clean_exit(EXIT_FAILURE);
     }
     if (!domain_param)
@@ -2611,14 +2912,14 @@ void parse_cmd(int argc, char **argv)
         }
         else
         {
-            log_msg("The domain list is required to be supplied.\n");
+            log_msg(LOG_ERROR, "The domain list is required to be supplied.\n");
             clean_exit(EXIT_FAILURE);
         }
     }
 
     if(context.domainfile == stdin && context.cmd_args.num_processes > 1)
     {
-        log_msg("In order to use multiprocessing, the domain list needs to be supplied as file.\n");
+        log_msg(LOG_ERROR, "In order to use multiprocessing, the domain list needs to be supplied as file.\n");
         clean_exit(EXIT_FAILURE);
     }
 }

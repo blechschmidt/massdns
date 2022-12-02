@@ -15,6 +15,8 @@
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define elements(a) (sizeof(a) / sizeof((a)[0]))
 
+static char *hexchars = "0123456789abcdef";
+
 typedef enum
 {
     DNS_REC_INVALID = -1, // Error code
@@ -136,6 +138,7 @@ dns_record_type dns_str_to_record_type(const char *str)
                             {
                                 return DNS_REC_CDNSKEY;
                             }
+                            return DNS_REC_INVALID;
                         default:
                             return DNS_REC_INVALID;
                     }
@@ -927,6 +930,8 @@ char *dns_record_type2str(dns_record_type type)
             return "RP";
         case DNS_REC_SIG:
             return "SIG";
+        case DNS_REC_SMIMEA:
+            return "SMIMEA";
         case DNS_REC_SOA:
             return "SOA";
         case DNS_REC_SRV:
@@ -1014,17 +1019,25 @@ ssize_t dns_str2namebuf(const char *name, uint8_t *buffer)
     return total_len + 1;
 }
 
-ssize_t dns_question_create_from_name(uint8_t *buffer, dns_name_t *name, dns_record_type type, uint16_t id)
+uint16_t dns_question_size(dns_name_t *name)
+{
+    return name->length + 16;
+}
+
+uint16_t dns_question_create_from_name(uint8_t *buffer, dns_name_t *name, dns_record_type type, uint16_t id)
 {
     static uint8_t *aftername;
 
-    memcpy(buffer + 12, name->name, name->length);
-    aftername = buffer + 12 + name->length;
     dns_buffer_set_id(buffer, id);
     *((uint16_t *) (buffer + 2)) = 0;
+    *((uint16_t *) (buffer + 4)) = htons(1);
+    *((uint16_t *) (buffer + 6)) = 0;
+    *((uint16_t *) (buffer + 8)) = 0;
+    *((uint16_t *) (buffer + 10)) = 0;
+    memcpy(buffer + 12, name->name, name->length);
+    aftername = buffer + 12 + name->length;
     *((uint16_t *) aftername) = htons(type);
     *((uint16_t *) (aftername + 2)) = htons(DNS_CLS_IN);
-    *((uint16_t *) (buffer + 4)) = htons(0x0001);
     return aftername + 4 - buffer;
 }
 
@@ -1514,6 +1527,27 @@ char* dns_raw_record_data2str(dns_record_t *record, uint8_t *begin, uint8_t *end
             parse_name(begin, record->data.raw + 6, end, name.name, &name.length, NULL);
             dns_print_readable(&ptr, buf_end - ptr, name.name, name.length, true);
             break;
+        case DNS_REC_SMIMEA:
+        case DNS_REC_TLSA:
+            if(record->length < 3)
+            {
+                goto raw;
+            }
+            written = snprintf(ptr, buf_end - ptr, "%" PRIu8 " %" PRIu8 " %" PRIu8 " ",
+                               record->data.raw[0], record->data.raw[1], record->data.raw[2]);
+            if(written < 0)
+            {
+                return buf;
+            }
+            ptr += written;
+
+            for(uint16_t i = 3; i < record->length; i++) {
+                uint8_t byte = record->data.raw[i];
+                *(ptr++) = hexchars[byte >> 4];
+                *(ptr++) = hexchars[byte & 0xF];
+            }
+            *ptr = 0;
+            break;
         raw:
         default:
             dns_print_readable(&ptr, sizeof(buf), record->data.raw, record->length, false);
@@ -1646,7 +1680,6 @@ uint8_t dns_ip_octet2label(uint8_t *dst, uint8_t octet)
 
 bool dns_ip2ptr(const char *qname, dns_name_t *name)
 {
-    static char *hexchars = "0123456789abcdef";
     struct sockaddr_storage ptr_addr_storage;
 
     if (inet_pton(AF_INET, qname, &((struct sockaddr_in*)&ptr_addr_storage)->sin_addr) == 1)

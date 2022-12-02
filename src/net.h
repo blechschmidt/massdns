@@ -18,11 +18,17 @@
 #define loop_sockets(sockets) \
         for (socket_info_t *socket = (sockets)->data; socket < ((socket_info_t*)(sockets)->data) + (sockets)->len; socket++)
 
+#define ETH_P_IP 0x0800
+#define ETH_P_IPV6 0x86DD
+
 typedef enum
 {
     SOCKET_TYPE_INTERFACE,
     SOCKET_TYPE_QUERY,
-    SOCKET_TYPE_CONTROL
+    SOCKET_TYPE_QUERY_TCP,
+    SOCKET_TYPE_CONTROL,
+    SOCKET_TYPE_TCP_RAW_RECEIVER,
+    SOCKET_TYPE_TCP_RAW_SENDER
 } socket_type_t;
 
 typedef enum
@@ -33,7 +39,7 @@ typedef enum
 
 typedef struct
 {
-    sa_family_t protocol;
+    sa_family_t family;
     int descriptor;
     socket_type_t type;
     void *data;
@@ -56,7 +62,7 @@ socklen_t sockaddr_storage_size(struct sockaddr_storage *storage)
     {
         return sizeof(struct sockaddr_in6);
     }
-    return 0;
+    abort();
 }
 
 #ifdef HAVE_EPOLL
@@ -314,6 +320,37 @@ char *sockaddr2str(struct sockaddr_storage *addr)
     snprintf(str + len, sizeof(str) - len, ":%" PRIu16, port);
 
     return str;
+}
+
+/**
+ * Determine the local IP address for a given destination.
+ *
+ * @param remote_addr The remote address.
+ * @param local_addr The local address to be filled in.
+ * @param local_len The size of the socket address structure.
+ * @return 0 on success, -1 otherwise.
+ */
+int get_local_addr(struct sockaddr_storage *remote_addr, struct sockaddr_storage *local_addr, socklen_t *local_len)
+{
+    int sock = socket(remote_addr->ss_family, SOCK_DGRAM, 0);
+    int result = 0;
+    if(sock < 0)
+    {
+        return -1;
+    }
+    if(connect(sock, (struct sockaddr*)remote_addr, sizeof(*remote_addr)) < 0)
+    {
+        result = -1;
+        goto cleanup;
+    }
+    if(getsockname(sock, (struct sockaddr*)local_addr, local_len) < 0)
+    {
+        result = -1;
+        goto cleanup;
+    }
+    cleanup:
+    close(sock);
+    return result;
 }
 
 #endif //MASSRESOLVER_NET_H

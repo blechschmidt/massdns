@@ -21,10 +21,17 @@
 #include "hashmap.h"
 #include "dns.h"
 #include "timed_ring.h"
+#include "tcp.h"
 
-#define MAXIMUM_MODULE_COUNT 0xFF
 #define COMMON_UNPRIVILEGED_USER "nobody"
 #define COMMON_UNPRIVILEGED_GROUP "nogroup"
+
+#define LOG_DEBUG 0
+#define LOG_INFO 1
+#define LOG_WARN 2
+#define LOG_ERROR 3
+
+#define LOGLEVEL LOG_WARN
 
 const uint32_t OUTPUT_BINARY_VERSION = 0x00;
 
@@ -71,6 +78,8 @@ typedef struct
 {
     struct sockaddr_storage address;
     resolver_stats_t stats; // To be used to track resolver bans or non-replying resolvers
+    struct sockaddr_storage source_addr; // The source address to be used by raw sockets
+    uint16_t next_src_port;
 } resolver_t;
 
 typedef struct {
@@ -95,6 +104,16 @@ typedef struct
     size_t dedicated_resolver_index;
     lookup_key_t key;
     socket_info_t *socket;
+    bool use_tcp;
+    socket_info_t tcp_socket;
+    struct {
+        uint8_t *buffer;
+        size_t received;
+        struct sockaddr_storage src_addr;
+        uint32_t ack;
+        tcp_data_tracker_t *window_tracker;
+        bool terminated;
+    } tcp_state;
 } lookup_t;
 
 typedef enum
@@ -114,6 +133,19 @@ typedef enum
     OUTPUT_LIST,
     OUTPUT_NDJSON
 } output_t;
+
+typedef enum
+{
+    LOOKUP_FAILURE_TIMEOUT,
+    LOOKUP_FAILURE_MAXRETRIES,
+    LOOKUP_FAILURE_NOFAILURE
+} lookup_failure_reason_t;
+
+const char *lookup_failure_text[] = {
+        "TIMEOUT",
+        "MAXRETRIES",
+        "IF YOU SEE THIS IN MASSDNS OUTPUT, FILE A BUG REPORT"
+};
 
 typedef enum {
     FILTER_DISABLED = 0,
@@ -184,18 +216,23 @@ typedef struct
         void (*help_function)();
         bool flush;
         bool predictable_resolver;
-        bool use_pcap;
         size_t num_processes;
         size_t socket_count;
         bool busypoll;
         bool extended_input;
         bool auto_concurrency;
+        bool tcp_enabled;
+        bool tcp_only;
+        bool tcp_raw;
     } cmd_args;
 
     struct
     {
         buffer_t interfaces4; // Sockets used for receiving queries
         buffer_t interfaces6; // Sockets used for receiving queries
+        buffer_t raw_send4;
+        buffer_t raw_send6;
+        buffer_t raw_receive;
         int *pipes;
         socket_info_t write_pipe;
         socket_info_t *master_pipes_read;
@@ -218,8 +255,6 @@ typedef struct
     size_t fork_index;
     struct {
         bool enabled;
-        buffer_t ranges4;
-        buffer_t ranges6;
         struct sockaddr_storage src_range;
     } srcrand;
     struct

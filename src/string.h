@@ -165,13 +165,10 @@ bool startswith(char* haystack, char* needle, bool case_sensitive) // Supports A
 
 size_t json_escape_str(char *dst, size_t dst_len, const char *src)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
     json_escape_body(src[i] != 0);
-}
-
-// Buffer needs to have at least one byte.
-size_t json_escape(char *dst, size_t dst_len, const uint8_t *src, size_t src_len)
-{
-    json_escape_body(i != src_len);
+#pragma GCC diagnostic pop
 }
 
 #undef require_space
