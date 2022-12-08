@@ -6,6 +6,10 @@
 #include <sys/resource.h>
 #endif
 
+#ifdef HAVE_EPOLL
+#define IS_LINUX
+#endif
+
 #include "massdns.h"
 #include "string.h"
 #include "random.h"
@@ -568,7 +572,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
     single_list_clear(&sockets);
 }
 
-
+#ifdef IS_LINUX
 void tcp_raw_add_sender_socket(int version)
 {
     socket_info_t info;
@@ -612,6 +616,7 @@ void tcp_raw_add_receiver_socket(int version)
     log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw receiving socket: %s\n", version, strerror(errno));
     clean_exit(1);
 }
+#endif
 
 
 void query_sockets_setup()
@@ -623,7 +628,7 @@ void query_sockets_setup()
             add_default_socket(4);
             add_default_socket(6);
         }
-
+#ifdef IS_LINUX
         if(context.cmd_args.tcp_raw)
         {
             tcp_raw_add_sender_socket(4);
@@ -631,6 +636,7 @@ void query_sockets_setup()
             tcp_raw_add_receiver_socket(4);
             tcp_raw_add_receiver_socket(6);
         }
+#endif
     }
     else
     {
@@ -798,6 +804,13 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     return NULL;
 }
 
+void timeout_reset(lookup_t *lookup)
+{
+    timed_ring_remove(&context.ring, lookup->ring_entry);
+    lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
+}
+
+#ifdef IS_LINUX
 void tcp_close(lookup_t *lookup)
 {
     if(!lookup->use_tcp || lookup->tcp_socket.descriptor <= 0)
@@ -816,12 +829,6 @@ void tcp_cleanup(lookup_t *lookup)
     lookup->tcp_state.buffer = NULL;
     tcp_data_tracker_free(lookup->tcp_state.window_tracker);
     lookup->tcp_state.window_tracker = NULL;
-}
-
-void timeout_reset(lookup_t *lookup)
-{
-    timed_ring_remove(&context.ring, lookup->ring_entry);
-    lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
 }
 
 void tcp_connected(socket_info_t *socket_info)
@@ -850,6 +857,8 @@ void tcp_connected(socket_info_t *socket_info)
     }
     shutdown(tcp_socket, SHUT_WR);
 }
+
+#endif
 
 void srcrand_random_addr(struct sockaddr_in6 *addr)
 {
@@ -942,6 +951,7 @@ void tcp_raw_connect(lookup_t *lookup)
     timeout_reset(lookup);
 }
 
+#ifdef IS_LINUX
 void tcp_connect(lookup_t *lookup)
 {
     if(context.cmd_args.tcp_raw)
@@ -1000,6 +1010,7 @@ void tcp_connect(lookup_t *lookup)
     ev.events = EPOLLIN | EPOLLOUT;
     epoll_ctl(context.epollfd, EPOLL_CTL_ADD, tcp_socket, &ev);
 }
+#endif // IS_LINUX
 
 void pick_resolver(lookup_t *lookup)
 {
@@ -1029,12 +1040,14 @@ void send_query(lookup_t *lookup)
 
     pick_resolver(lookup);
 
+#ifdef IS_LINUX
     if(lookup->use_tcp)
     {
         tcp_close(lookup);
         tcp_connect(lookup);
         return;
     }
+#endif
 
     // We need to select the correct socket pool: IPv4 socket pool for IPv4 resolver/IPv6 socket pool for IPv6 resolver
     buffer_t *interfaces;
@@ -1386,8 +1399,10 @@ void lookup_done(lookup_t *lookup)
     context.stats.finished++;
     lookup->tcp_state.terminated = true;
 
+#ifdef IS_LINUX
     tcp_close(lookup);
     tcp_cleanup(lookup);
+#endif //IS_LINUX
 
     timed_ring_remove(&context.ring, lookup->ring_entry);
 
@@ -2465,6 +2480,7 @@ void parse_cmd(int argc, char **argv)
             print_help();
             clean_exit(EXIT_SUCCESS);
         }
+#ifdef IS_LINUX
         else if (strcmp(argv[i], "--tcp-enabled") == 0)
         {
             context.cmd_args.tcp_enabled = true;
@@ -2479,6 +2495,7 @@ void parse_cmd(int argc, char **argv)
             context.cmd_args.tcp_enabled = true;
             context.cmd_args.tcp_raw = true;
         }
+#endif
         else if (strcmp(argv[i], "--busypoll") == 0 || strcmp(argv[i], "--busy-poll") == 0)
         {
             context.cmd_args.busypoll = true;

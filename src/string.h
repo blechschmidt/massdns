@@ -53,7 +53,7 @@ char *trim_start(char *str)
 {
     while (0 != *str)
     {
-        if(!isspace(*str))
+        if(!isspace((int)*str))
         {
             return str;
         }
@@ -67,7 +67,7 @@ void trim_end(char* str)
     char *last = str + strlen(str) - 1;
     while (last >= str)
     {
-        if(!isspace(*last))
+        if(!isspace((int)*last))
         {
             return;
         }
@@ -143,7 +143,7 @@ bool startswith(char* haystack, char* needle, bool case_sensitive) // Supports A
                 dst[dst_idx++] = complex_chars[complex_idx]; \
                 break; \
             default: \
-                if(isprint(src[i])) \
+                if(isprint((int)src[i])) \
                 { \
                     require_space(1); \
                     dst[dst_idx++] = src[i]; \
