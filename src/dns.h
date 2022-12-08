@@ -79,6 +79,7 @@ dns_record_type dns_str_to_record_type(const char *str)
     // Performance is important here because we may want to use this when reading
     // large numbers of DNS queries from a file.
     long int code;
+    char *endptr;
 
     switch (tolower(str[0]))
     {
@@ -430,8 +431,8 @@ dns_record_type dns_str_to_record_type(const char *str)
         case '8':
         case '9':
             errno = 0;
-            code = strtol(str, NULL, 10);
-            if(code < 0 || code > 0xFFFF || errno != 0)
+            code = strtol(str, &endptr, 10);
+            if(code < 0 || code > 0xFFFF || errno != 0 || *endptr != 0)
             {
                 return DNS_REC_INVALID;
             }

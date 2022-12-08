@@ -675,7 +675,7 @@ bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_r
 
         char *tok;
         dns_record_type qtype;
-        /*if((tok = strtok(line, "\t ")) && (qtype = dns_str_to_record_type(line)) != DNS_REC_INVALID)
+        if((tok = strtok(line, "\t ")) && (qtype = dns_str_to_record_type(line)) != DNS_REC_INVALID)
         {
             name = line + strlen(tok) + 1;
             *rtype = qtype;
@@ -683,7 +683,7 @@ bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_r
             {
                 continue;
             }
-        }*/
+        }
 
         if (context.cmd_args.extended_input)
         {
