@@ -587,7 +587,8 @@ void tcp_raw_add_sender_socket(int version)
     return;
 
     error:
-    log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw socket: %s\n", version, strerror(errno));
+    log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw sending socket: %s\n", version, strerror(errno));
+    clean_exit(1);
 }
 
 void tcp_raw_add_receiver_socket(int version)
@@ -608,7 +609,8 @@ void tcp_raw_add_receiver_socket(int version)
     return;
 
     error:
-    log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw socket: %s\n", version, strerror(errno));
+    log_msg(LOG_ERROR, "Failed to create IPv%d TCP raw receiving socket: %s\n", version, strerror(errno));
+    clean_exit(1);
 }
 
 
