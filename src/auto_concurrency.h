@@ -11,6 +11,7 @@ typedef struct
     struct timespec last_update;
     size_t iteration;
     size_t last_numtimeouts;
+    size_t last_domains;
 } auto_concurrency_state_t;
 
 auto_concurrency_state_t concurrency_state;
@@ -18,11 +19,11 @@ auto_concurrency_state_t concurrency_state;
 void init_concurrency_controller()
 {
     bzero(&concurrency_state, sizeof(concurrency_state));
-    concurrency_state.current_concurrency = context.cmd_args.auto_concurrency ? 1 : context.cmd_args.hashmap_size;
+    concurrency_state.current_concurrency = context.cmd_args.auto_concurrency ? 32 : context.cmd_args.hashmap_size;
     clock_gettime(CLOCK_REALTIME, &concurrency_state.last_update);
 }
 
-/* Return 1 if a > b, -1 if a < b and 0 if a == b */ 
+/* Return 1 if a > b, -1 if a < b and 0 if a == b */
 int timespec_compare(const struct timespec *a, const struct timespec *b)
 {
     if (a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec)
@@ -44,8 +45,7 @@ void timespec_diff(const struct timespec *old, const struct timespec *now, struc
         result->tv_sec--;
     }
     result->tv_nsec = now->tv_nsec >= old->tv_nsec ?
-            now->tv_nsec - old->tv_nsec
-            : (1000000000L - now->tv_nsec) + (1000000000L - old->tv_nsec);
+                      now->tv_nsec - old->tv_nsec : (1000000000L - now->tv_nsec) + (1000000000L - old->tv_nsec);
 }
 
 bool elapsed_ms(const struct timespec *old, const struct timespec *now, size_t ms)
@@ -79,11 +79,12 @@ void auto_concurrency_handle(const struct timespec *now)
     }
     concurrency_state.last_update = *now;
 
-    if (context.stats.numtimeouts - concurrency_state.last_numtimeouts == 0)
+    if (100 * (context.stats.numtimeouts - concurrency_state.last_numtimeouts) / (context.stats.numdomains - concurrency_state.last_domains) < 3)
     {
         concurrency_state.current_concurrency *= 2;
     }
 
+    concurrency_state.last_domains = context.stats.numdomains;
     concurrency_state.last_numtimeouts = context.stats.numtimeouts;
 }
 
