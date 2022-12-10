@@ -679,11 +679,15 @@ bool next_query(char **qname, dedicated_resolvers_t **dedicated_resolvers, dns_r
         trim_end(line);
 
 
-        char *tok;
         dns_record_type qtype;
-        if((tok = strtok(line, "\t ")) && (qtype = dns_str_to_record_type(line)) != DNS_REC_INVALID)
+        size_t rtype_len = strcspn(line, "\t ");
+        char orig_delim = line[rtype_len];
+        line[rtype_len] = 0;
+        qtype = dns_str_to_record_type(line);
+        line[rtype_len] = orig_delim;
+        if (qtype != DNS_REC_INVALID)
         {
-            name = line + strlen(tok) + 1;
+            name = trim_start(line + rtype_len);
             *rtype = qtype;
             if (*name == 0)
             {
@@ -2291,10 +2295,8 @@ void run()
         add_sockets(context.epollfd, EPOLLIN, EPOLL_CTL_ADD, &context.sockets.raw_receive);
     }
 #endif
-    if(context.cmd_args.busypoll)
-    {
-        make_query_sockets_nonblocking();
-    }
+
+    make_query_sockets_nonblocking();
 
     init_concurrency_controller();
 
