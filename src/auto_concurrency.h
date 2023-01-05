@@ -79,7 +79,9 @@ void auto_concurrency_handle(const struct timespec *now)
     }
     concurrency_state.last_update = *now;
 
-    if (100 * (context.stats.numtimeouts - concurrency_state.last_numtimeouts) / (context.stats.numdomains - concurrency_state.last_domains) < 3)
+    size_t resolved_domains = context.stats.numdomains - concurrency_state.last_domains;
+
+    if (resolved_domains > 0 && 100 * (context.stats.numtimeouts - concurrency_state.last_numtimeouts) / resolved_domains < 3)
     {
         concurrency_state.current_concurrency *= 2;
     }
