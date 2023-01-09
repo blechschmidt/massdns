@@ -4,8 +4,8 @@
 Authoritative Subdomain Enumeration Tool.
 
 This script performs subdomain enumeration against authoritative name servers directly and thus does not require third-
-party resolvers. The concurrency is determined automatically by massdns and supports hundreds of thousands queries per
-second, while delivering reliable results.
+party resolvers. The concurrency is determined automatically by massdns and supports hundreds of thousands of queries
+per second, while delivering reliable results.
 
 Limitation: Zone delegation is only handled up to the delegation point. For example, if example.org is enumerated and
 sub.example.org is delegated to another name server, abc.sub.example.org will not be found by this script if "abc.sub"
@@ -103,16 +103,16 @@ async def get_ns_names(name, resolver=None, detect_soa=True):
     return extract_record_data(result)
 
 
-async def get_ips(names, resolver=None):
+async def get_ips(names, resolver=None, ipv6_only=False):
     if resolver is None:
         resolver = dns.asyncresolver.Resolver()
 
     awaitables = []
 
     for name in names:
-        if ip_supported(4):
+        if ip_supported(4) and not ipv6_only:
             awaitables.append(resolver.resolve(name, dns.rdatatype.A))
-        if ip_supported(6):
+        if ip_supported(6) or ipv6_only:
             awaitables.append(resolver.resolve(name, dns.rdatatype.AAAA))
 
     result = []
@@ -295,6 +295,10 @@ def get_auth_server(auth, soa):
     return result
 
 
+def drop_dns(ips):
+    pass
+
+
 async def main():
     global tempdir
 
@@ -304,14 +308,17 @@ async def main():
 
     parser = argparse.ArgumentParser(description='Authoritative Subdomain Enumeration Tool.')
     parser.add_argument('--domain', '-d', metavar='DOMAIN', help='Domain name.', required=True)
-    parser.add_argument('--wordlist', '-w', metavar='WORDLIST', help='Subdomain wordlist file.', required=True)
-    parser.add_argument('--type', '-t', help='DNS record type to test against.', default='A')
+    parser.add_argument('--wordlist', '-l', metavar='WORDLIST', help='Subdomain wordlist file.', required=True)
+    parser.add_argument('--type', '-t', metavar='RTYPE', help='DNS record type to test against.', default='A')
     parser.add_argument('--skip-avail-check', help='Do not test whether nameservers are available.',
                         action='store_true')
     parser.add_argument('--no-wildcard-filter', help='Do not filter replies that appear to be wildcard responses.',
                         action='store_true')
     parser.add_argument('--wildcard-threshold', help='Wildcard check threshold.', type=int, default=2)
     parser.add_argument('--massdns', help='Path to massdns binary.')
+    parser.add_argument('--concurrency', '-s', help='MassDNS concurrency.', default='auto')
+    parser.add_argument('--interval', '-i', help='MassDNS resolution timeout.', default='500')
+    parser.add_argument('--resolve-count', '-c', help='MassDNS resolution count.', default='50')
     args = parser.parse_args()
     domain = args.domain.encode('idna').decode('ascii').rstrip('.')
     domain_labels = domain.split('.')
@@ -352,8 +359,23 @@ async def main():
         resolver_file_contents = '\n'.join(nameserver_ips)
         resolvers_file.write(resolver_file_contents)
 
-    log('Writing enumeration input file ...')
+    resolver = dns.asyncresolver.Resolver()
+    resolver.nameservers = nameserver_ips
     wildcard_test_name = (random_subdomain() + '.' + domain).lower()
+
+    """In case the server returns NXDOMAIN for non-existing names, another rcode is a strong indicator for another
+        type of record existing for a name. (For example, if `A random-subdomain.example.com` returns NXDOMAIN while
+        `A mail.example.com` returns NOERROR, it may be because `MX mail.example.com` exists.)"""
+    try:
+        answer = await resolver.resolve(wildcard_test_name, raise_on_no_answer=False)
+        rcode = answer.response.rcode()
+        server_behavior.global_noerror = rcode == dns.rcode.NOERROR
+    except dns.resolver.NXDOMAIN:
+        server_behavior.global_noerror = False
+    predicate = 'returns' if server_behavior.global_noerror else 'does not return'
+    log('The nameserver ' + predicate + ' NOERROR for non-existing domains.')
+
+    log('Writing enumeration input file ...')
     total = 1
     with open(wordlist_path) as wordlist_file, open(permutations_path, 'w') as permutations_file:
         permutations_file.write(wildcard_test_name + '\n')
@@ -366,27 +388,23 @@ async def main():
             permutations_file.write((subdomain + domain).lower() + '\n')
             total += 1
 
-    resolver = dns.asyncresolver.Resolver()
-    resolver.nameservers = nameserver_ips
-
-    """In case the server returns NXDOMAIN for non-existing names, another rcode is a strong indicator for another
-    type of record existing for a name. (For example, if `A random-subdomain.example.com` returns NXDOMAIN while
-    `A mail.example.com` returns NOERROR, it may be because `MX mail.example.com` exists.)"""
-    try:
-        answer = await resolver.resolve(wildcard_test_name, raise_on_no_answer=False)
-        rcode = answer.response.rcode()
-        server_behavior.global_noerror = rcode == dns.rcode.NOERROR
-    except dns.resolver.NXDOMAIN:
-        server_behavior.global_noerror = False
-    predicate = 'returns' if server_behavior.global_noerror else 'does not return'
-    log('The nameserver ' + predicate + ' NOERROR for non-existing domains.')
-
     log('MassDNS enumeration ...')
 
+    massdns_args = [
+        '-s', args.concurrency,
+        '-i', args.interval,
+        '-c', args.resolve_count
+    ]
     output_flags = ['Je', '--filter', 'NOERROR'] if not server_behavior.global_noerror else ['Je']
-    proc = subprocess.Popen([massdns_path, '-o', *output_flags, '-s', 'auto', '--retry', 'never', '-r', resolvers_path,
-                             '-w', output_path, '--status-format', 'json', '--processes', str(cpu_count),
+    proc = subprocess.Popen([massdns_path,
+                             '-o', *output_flags,
+                             '--retry', 'never',
+                             '-r', resolvers_path,
+                             '-w', output_path,
+                             '--status-format', 'json',
+                             '--processes', str(cpu_count),
                              '-t', args.type,
+                             *massdns_args,
                              permutations_path], stderr=subprocess.PIPE)
 
     massdns_show_progress(proc, total)
@@ -451,6 +469,7 @@ async def main():
         log('Writing wildcard test input file ...')
 
         wildcard_subdomain1 = random_subdomain()
+        wildcard_subdomain2 = random_subdomain()
         wildcard_check = DnsNode()
         wildcard_in_path = os.path.join(tempdir, 'wildcard_in')
         total = 0
@@ -461,18 +480,26 @@ async def main():
                 if node.hits > args.wildcard_threshold and not node.delegation:
                     normalized = '.'.join(reversed(name))
                     wildcard_check.add(normalized).data = node.data
-                    wildcard_file.write(wildcard_subdomain1 + '.' + normalized + '\n')
-                    total += 1
+                    wildcard_file.write(wildcard_subdomain1 + '.' + normalized + '\n' +
+                                        wildcard_subdomain2 + '.' + normalized + '\n')
+                    total += 2
 
         wildcard_out_path = os.path.join(tempdir, 'wildcard_out')
 
-        proc = subprocess.Popen([massdns_path, '-o', 'Je', '-s', 'auto', '--retry', 'never', '-r', resolvers_path,
-                                 '-w', wildcard_out_path, '--status-format', 'json', '--processes', str(cpu_count),
+        proc = subprocess.Popen([massdns_path,
+                                 '-o', 'Je',
+                                 '--retry', 'never',
+                                 '-r', resolvers_path,
+                                 '-w', wildcard_out_path,
+                                 '--status-format', 'json',
+                                 '--processes', str(cpu_count),
                                  '-t', args.type,
+                                 *massdns_args,
                                  wildcard_in_path], stderr=subprocess.PIPE)
 
         massdns_show_progress(proc, total)
 
+        wildcard_cmp = {}
         with MultiFileLineReader([wildcard_out_path + str(i) for i in range(0, cpu_count)]) as f:
             for line in f:
                 parsed = json.loads(line)
@@ -482,12 +509,28 @@ async def main():
                 node = dns_tree.find(name)
                 if node is None:
                     continue
+
+                # We use two random strings to filter random records.
+                # As an example, <random1>.sandbox.google.com differs from <random2>.sandbox.google.com.
+                # This means that we cannot infer something useful from differing records below sandbox.google.com.
+                # We treat it as a wildcard then.
+                hashable_name = '.'.join(name)
+                if hashable_name not in wildcard_cmp:
+                    wildcard_cmp[hashable_name] = parsed
+                elif parsed['status'] != wildcard_cmp[hashable_name]['status'] or \
+                        create_rrset(wildcard_cmp[hashable_name].get('data', {}).get('answers', [])) != answers:
+                    child = DnsNode()
+                    child.data = parsed
+                    node.children = {'*': child}
+                    continue
+
+                # Remove those nodes whose records are equal to the wildcard's records
                 erase = []
                 for subdomain, child in node.traverse():
                     if child.data is None:
                         continue
                     answers_cmp = create_rrset(child.data.get('data', {}).get('answers', []))
-                    if answers == answers_cmp:
+                    if answers == answers_cmp and parsed['status'] == child.data['status']:
                         erase.append(subdomain)
                 for n in erase:
                     node.remove(n)
@@ -495,7 +538,7 @@ async def main():
                 if parsed['status'] == 'NOERROR':
                     child = DnsNode()
                     child.data = parsed
-                    node.children = {'*': child}
+                    node.children['*'] = child
 
     dns_tree.sort()
 
