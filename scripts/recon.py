@@ -111,9 +111,9 @@ async def get_ips(names, resolver=None, ipv6_only=False):
 
     for name in names:
         if ip_supported(4) and not ipv6_only:
-            awaitables.append(resolver.resolve(name, dns.rdatatype.A))
+            awaitables.append(resolver.resolve(name, dns.rdatatype.A, raise_on_no_answer=False))
         if ip_supported(6) or ipv6_only:
-            awaitables.append(resolver.resolve(name, dns.rdatatype.AAAA))
+            awaitables.append(resolver.resolve(name, dns.rdatatype.AAAA, raise_on_no_answer=False))
 
     result = []
     for answer in await asyncio.gather(*awaitables):
@@ -295,10 +295,6 @@ def get_auth_server(auth, soa):
     return result
 
 
-def drop_dns(ips):
-    pass
-
-
 async def main():
     global tempdir
 
@@ -319,6 +315,8 @@ async def main():
     parser.add_argument('--concurrency', '-s', help='MassDNS concurrency.', default='auto')
     parser.add_argument('--interval', '-i', help='MassDNS resolution timeout.', default='500')
     parser.add_argument('--resolve-count', '-c', help='MassDNS resolution count.', default='50')
+    parser.add_argument('--outfile', '-w', help='Store results in file instead of printing to stdout')
+    parser.add_argument('--format', '-f', help='Output format', choices=['list', 'json'], default='list')
     args = parser.parse_args()
     domain = args.domain.encode('idna').decode('ascii').rstrip('.')
     domain_labels = domain.split('.')
@@ -541,15 +539,25 @@ async def main():
                     node.children['*'] = child
 
     dns_tree.sort()
-
-    for name, node in dns_tree.traverse():
-        if len(name) <= len(domain_labels):
-            continue
-        print_name = '.'.join(reversed(name))
-        if node.delegation:
-            print('?.' + print_name)
-            continue
-        print(print_name)
+    f = sys.stdout if args.outfile is None else open(args.outfile, 'w')
+    try:
+        for name, node in dns_tree.traverse():
+            if len(name) <= len(domain_labels):
+                continue
+            print_name = '.'.join(reversed(name))
+            if node.delegation:
+                print_name = '?.' + print_name
+            if args.format == 'list':
+                f.write(print_name + '\n')
+            else:
+                obj = {
+                    'name': print_name,
+                    'query': node.data
+                }
+                f.write(json.dumps(obj) + '\n')
+    finally:
+        if args.outfile is not None:
+            f.close()
 
 
 asyncio.run(main())
