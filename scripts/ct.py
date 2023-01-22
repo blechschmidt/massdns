@@ -3,13 +3,14 @@
 import argparse
 import json
 import sys
+import os
 import urllib.parse
 import urllib.request
 
 parser = argparse.ArgumentParser(description='Certificate transparency name extractor.')
-parser.add_argument('-d', '--domains', metavar='domain_file', type=str, help='Domains for certificate search.',
+parser.add_argument('-d', '--domains', metavar='domain_file', type=str, help='File containing domains for certificate search.',
                     required=False)
-parser.add_argument('domain', nargs='*')
+parser.add_argument('domain', nargs='*', help='Domain for certificate search.')
 args = parser.parse_intermixed_args()
 
 
