@@ -22,13 +22,16 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <grp.h>
-#include <sys/ioctl.h>
 #include <stddef.h>
 #ifdef HAVE_SYSINFO
     #include <sys/sysinfo.h>
 #endif
 #include <limits.h>
 #include <stdarg.h>
+
+#ifdef IS_LINUX
+#include <sys/resource.h>
+#endif
 
 static char json_buffer[5 * 0xFFFF];
 static uint8_t packet_buffer[0x20000];
@@ -2184,9 +2187,35 @@ void make_query_sockets_nonblocking()
     }
 }
 
+void set_open_file_limit_max()
+{
+#ifdef IS_LINUX
+    // With TCP, we create a socket for each lookup. Therefore, increase the limit of open files to the maximum.
+    if(context.cmd_args.tcp_enabled && !context.cmd_args.tcp_raw)
+    {
+        struct rlimit limit;
+        if (getrlimit(RLIMIT_NOFILE, &limit) != 0)
+        {
+            log_msg(LOG_ERROR, "Failed to get open file limit: %s\n", strerror(errno));
+            clean_exit(EXIT_FAILURE);
+        }
+
+        limit.rlim_cur = limit.rlim_max;
+
+        if (setrlimit(RLIMIT_NOFILE, &limit) != 0)
+        {
+            log_msg(LOG_ERROR, "Failed to set open file limit: %s\n", strerror(errno));
+            clean_exit(EXIT_FAILURE);
+        }
+    }
+#endif
+}
+
 void run()
 {
     static char multiproc_outfile_name[8192];
+
+    set_open_file_limit_max();
 
     if(!urandom_init())
     {
@@ -2471,6 +2500,7 @@ void parse_cmd(int argc, char **argv)
     context.cmd_args.retry_codes[DNS_RCODE_NOERROR] = false;
     context.cmd_args.num_processes = 1;
     context.cmd_args.socket_count = 1;
+    context.cmd_args.tcp_enabled = true;
 #ifndef HAVE_EPOLL
     context.cmd_args.busypoll = true;
 #endif
@@ -2483,9 +2513,9 @@ void parse_cmd(int argc, char **argv)
             clean_exit(EXIT_SUCCESS);
         }
 #ifdef IS_LINUX
-        else if (strcmp(argv[i], "--tcp-enabled") == 0)
+        else if (strcmp(argv[i], "--tcp-disabled") == 0)
         {
-            context.cmd_args.tcp_enabled = true;
+            context.cmd_args.tcp_enabled = false;
         }
         else if (strcmp(argv[i], "--tcp-only") == 0)
         {
