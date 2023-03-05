@@ -11,6 +11,7 @@ QNAME = "c.afekv.com"
 
 if len(sys.argv) < 2:
     print("Rapid7 DNS lookup file required as parameter")
+    print("Usage: python3 " + sys.argv[0] + " <file>")
     sys.exit(1)
 
 with open(sys.argv[1], "r") as f:

@@ -147,6 +147,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Expecting a file name containing binary output from MassDNS as parameter")
+        print("Usage: python3 " + sys.argv[0] + " <file>")
         sys.exit(1)
 
     with BinaryDnsResultParser(sys.argv[1], True) as parser:

@@ -5,10 +5,10 @@ import os
 import sys
 
 parser = argparse.ArgumentParser(description='Subdomain enumeration list generator.')
-parser.add_argument('subdomain_file', type=str, help='Subdomain dictionary.')
-parser.add_argument('-d', '--domains', metavar='domain_file', type=str, help='File name of domains to append.',
+parser.add_argument('domain', nargs='*', help='Domain to append.')
+parser.add_argument('subdomain_file', type=str, help='Subdomain file to append to.')
+parser.add_argument('-d', '--domains', metavar='domain_file', type=str, help='File containing domains to append.',
                     required=False)
-parser.add_argument('domain', nargs='*')
 args = parser.parse_intermixed_args()
 
 if not args.domain and not args.domains:

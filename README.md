@@ -10,7 +10,7 @@ names in the order of millions or even billions. Without special configuration, 
 
 ## Compilation
 Clone the git repository and `cd` into the project root folder. Then run `make` to build from source.
-If you are not on Linux, run `make nolinux`. On Windows, the `Cygwin` packages `gcc-core`, `git` and `make` are required.
+If you are not on Linux, run `make nolinux`. On Windows, the [Cygwin](https://cygwin.com/) packages `gcc-core`, `git` and `make` are required.
 
 ## Usage
 ```

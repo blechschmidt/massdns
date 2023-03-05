@@ -10,7 +10,7 @@ OUTPUT_FILE=os.path.dirname(os.path.realpath(__file__)) + "/../lists/public-dns.
 MIN_RELIABILIY=0.99
 
 try:
-
+    print("Fetching public DNS servers...")
     # Try to open output file for writing
     with open(OUTPUT_FILE, 'w') as f:
         # Fetch public servers
@@ -20,6 +20,8 @@ try:
             if validators.ipv4(ip['ip']) and ip['reliability'] > MIN_RELIABILIY:
                 # Write results
                 f.write("%s\n" % ip['ip'])
+    print("Done.")
+    print("Output file: %s" % OUTPUT_FILE)
 
 except Exception as e:
     print("Error.")
