@@ -547,12 +547,12 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
     single_list_ref_foreach_free(bind_addrs, element)
     {
         struct sockaddr_storage* addr = element->data;
-        socket_info_t info;
+        socket_info_t info = {0};
         info.descriptor = socket(addr->ss_family, SOCK_DGRAM, IPPROTO_UDP);
+        info.family = addr->ss_family;
+        info.type = SOCKET_TYPE_QUERY;
         if(info.descriptor >= 0)
         {
-            info.family = addr->ss_family;
-            info.type = SOCKET_TYPE_QUERY;
             if(bind(info.descriptor, (struct sockaddr*)addr, sizeof(*addr)) != 0)
             {
                 log_msg(LOG_ERROR, "Not adding socket %s due to bind failure: %s\n", sockaddr2str(addr), strerror(errno));
@@ -566,7 +566,7 @@ void set_user_sockets(single_list_t *bind_addrs, buffer_t *buffer)
         }
         else
         {
-            log_msg(LOG_ERROR, "Failed to create IPv%d socket: %s\n", info.family, strerror(errno));
+            log_msg(LOG_ERROR, "Failed to create UDP socket: %s\n", strerror(errno));
         }
         free(element->data);
     }
