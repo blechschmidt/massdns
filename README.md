@@ -131,7 +131,7 @@ As a consequence, the Python script does not resolve the records in an ascending
 
 Similar to [subbrute](https://github.com/TheRook/subbrute), MassDNS allows you to brute force subdomains using the included `subbrute.py` script:
 ```
-$ ./scripts/subbrute.py lists/names.txt example.com | ./bin/massdns -r lists/resolvers.txt -t A -o S -w results.txt
+$ ./scripts/subbrute.py example.com lists/names.txt | ./bin/massdns -r lists/resolvers.txt -t A -o S -w results.txt
 ```
 
 As an additional method of reconnaissance, the `ct.py` script extracts subdomains from certificate transparency logs by scraping the data from [crt.sh](https://crt.sh):
