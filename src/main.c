@@ -2058,19 +2058,22 @@ void privilege_drop()
     {
         struct passwd *drop_user = getpwnam(username);
         struct group *drop_group = getgrnam(groupname);
-        if (drop_group && drop_user && setgid(drop_group->gr_gid) == 0 && setuid(drop_user->pw_uid) == 0)
+        uid_t effective_uid = drop_user ? drop_user->pw_uid : 65534;
+        gid_t effective_gid = drop_group ? drop_group->gr_gid : 65534;
+
+        if (setgid(effective_gid) == 0 && setuid(effective_uid) == 0)
         {
             if (!context.cmd_args.quiet)
             {
-                log_msg(LOG_INFO, "Privileges have been dropped to \"%s:%s\" for security reasons.\n", username, groupname);
+                log_msg(LOG_INFO, "Privileges have been dropped to \"%d:%d\" for security reasons.\n", effective_uid, effective_gid);
             }
         }
         else
         {
-            log_msg(LOG_ERROR, "Privileges could not be dropped to \"%s:%s\".\n"
+            log_msg(LOG_ERROR, "Privileges could not be dropped to \"%s:%s\" or fallback UID:GID \"%d:%d\".\n"
                 "For security reasons, this program will only run as root user when supplied with --root, "
                 "which is not recommended.\n"
-                "It is better practice to run this program as a different user.\n", username, groupname);
+                "It is better practice to run this program as a different user.\n", username, groupname, effective_uid, effective_gid);
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -2082,6 +2085,8 @@ void privilege_drop()
         }
     }
 }
+
+
 
 void init_pipes()
 {
