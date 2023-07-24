@@ -2061,6 +2061,18 @@ void privilege_drop()
         uid_t effective_uid = drop_user ? drop_user->pw_uid : 65534;
         gid_t effective_gid = drop_group ? drop_group->gr_gid : 65534;
 
+        // Check if user and group exist when they are provided in command line arguments
+        if(context.cmd_args.drop_user && drop_user == NULL)
+        {
+            log_msg(LOG_ERROR, "User \"%s\" does not exist.\n", username);
+            clean_exit(EXIT_FAILURE);
+        }
+        if(context.cmd_args.drop_group && drop_group == NULL)
+        {
+            log_msg(LOG_ERROR, "Group \"%s\" does not exist.\n", groupname);
+            clean_exit(EXIT_FAILURE);
+        }
+
         if (setgid(effective_gid) == 0 && setuid(effective_uid) == 0)
         {
             if (!context.cmd_args.quiet)
