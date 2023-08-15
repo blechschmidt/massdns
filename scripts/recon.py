@@ -413,7 +413,11 @@ async def main():
     log('Output processing ...')
 
     errors_seen = False
-    with MultiFileLineReader([output_path + str(i) for i in range(0, cpu_count)]) as f:
+    if cpu_count <= 1:
+        massdns_outfiles = [output_path]
+    else:
+        massdns_outfiles = [output_path + str(i) for i in range(0, cpu_count)]
+    with MultiFileLineReader(massdns_outfiles) as f:
         if not args.no_wildcard_filter and server_behavior.global_noerror:
             for line in f:
                 parsed = json.loads(line)
@@ -433,7 +437,7 @@ async def main():
 
     dns_tree = DnsNode()
 
-    with MultiFileLineReader([output_path + str(i) for i in range(0, cpu_count)]) as f:
+    with MultiFileLineReader(massdns_outfiles) as f:
         for line in f:
             parsed = json.loads(line)
             if parsed['name'].rstrip('.') == wildcard_test_name.rstrip('.'):
@@ -497,8 +501,12 @@ async def main():
 
         massdns_show_progress(proc, total)
 
+        if cpu_count <= 1:
+            wildcard_out_paths = [wildcard_out_path]
+        else:
+            wildcard_out_paths = [wildcard_out_path + str(i) for i in range(0, cpu_count)]
         wildcard_cmp = {}
-        with MultiFileLineReader([wildcard_out_path + str(i) for i in range(0, cpu_count)]) as f:
+        with MultiFileLineReader(wildcard_out_paths) as f:
             for line in f:
                 parsed = json.loads(line)
                 answers = create_rrset(parsed.get('data', {}).get('answers', []))
