@@ -764,7 +764,7 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
         if(name_length < 0)
         {
             log_msg(LOG_ERROR, "Illegal DNS name: %s\n", qname);
-            goto exit;
+            goto fail;
         }
         else
         {
@@ -773,11 +773,10 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
     }
 
     lookup->key.type = type;
-    lookup_t *existing_lookup = hashmapGet(context.map, &lookup->key);
-    if(existing_lookup != NULL)
+    if(hashmapGet(context.map, &lookup->key) != NULL)
     {
-        existing_lookup->count += 1;
-        goto exit;
+        log_msg(LOG_ERROR, "Duplicate DNS name: %s\n", qname);
+        goto fail;
     }
 
     lookup->ring_entry = timed_ring_add(&context.ring, context.cmd_args.interval_ms * TIMED_RING_MS, lookup);
@@ -805,7 +804,8 @@ lookup_t *new_lookup(const char *qname, dns_record_type type)
 
     return lookup;
 
-    exit:
+    fail:
+    context.cmd_args.record_type_index = 0;
     lookup_cleanup_dedicated_resolvers(lookup);
     context.lookup_pool.len++;
     return NULL;
@@ -1394,12 +1394,10 @@ bool is_unacceptable(dns_pkt_t *packet)
 void write_exhausted_tries(lookup_t *lookup, const char *status)
 {
     if(context.cmd_args.output == OUTPUT_NDJSON && context.format.write_exhausted_tries) {
-        for(size_t i = 0; i < lookup->count + 1; i++) {
-            json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&lookup->key.name));
-            fprintf(context.outfile,
-                    "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"error\":\"%s\"}\n", json_buffer,
-                    dns_record_type2str(lookup->key.type), "IN", status);
-        }
+        json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&lookup->key.name));
+        fprintf(context.outfile,
+                "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"error\":\"%s\"}\n", json_buffer,
+                dns_record_type2str(lookup->key.type), "IN", status);
     }
 }
 
@@ -1547,192 +1545,212 @@ void do_read(uint8_t *offset, size_t len, struct sockaddr_storage *recvaddr, int
             return;
         }
 
-        for(size_t i = 0; i < lookup->count + 1; i++) {
+        // Print packet
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        uint16_t short_len = (uint16_t) len;
+        uint8_t *next = parse_offset;
+        dns_record_t rec;
+        size_t non_add_count = packet.head.header.ans_count + packet.head.header.auth_count;
+        dns_section_t section = DNS_SECTION_ANSWER;
+        size_t section_index = 0;
+        bool section_emitted = false;
+        char *buf;
 
-            // Print packet
-            struct timespec now;
-            clock_gettime(CLOCK_REALTIME, &now);
-            uint16_t short_len = (uint16_t) len;
-            uint8_t *next = parse_offset;
-            dns_record_t rec;
-            size_t non_add_count = packet.head.header.ans_count + packet.head.header.auth_count;
-            dns_section_t section = DNS_SECTION_ANSWER;
-            size_t section_index = 0;
-            bool section_emitted = false;
-            char *buf;
-
-            switch (context.cmd_args.output) {
-                case OUTPUT_BINARY:
-                    // The output file is platform dependent for performance reasons.
-                    fwrite(&now.tv_sec, sizeof(now.tv_sec), 1, context.outfile);
-                    fwrite(recvaddr, sizeof(*recvaddr), 1, context.outfile);
-                    fwrite(&short_len, sizeof(short_len), 1, context.outfile);
-                    fwrite(offset, short_len, 1, context.outfile);
-                    break;
-                case OUTPUT_LIST:
-                    if (packet.head.header.rcode == DNS_RCODE_NOERROR
-                        && (packet.head.header.ans_count > 0 || context.format.list_write_zero_answers)) {
-                        buf = dns_name2str(&packet.head.question.name);
-                        size_t name_len = strlen(buf);
-                        if (name_len > 0 && buf[name_len - 1] == '.') {
-                            buf[name_len - 1] = '\0';
-                        }
-                        fprintf(context.outfile, "%s\n", buf);
+        switch(context.cmd_args.output)
+        {
+            case OUTPUT_BINARY:
+                // The output file is platform dependent for performance reasons.
+                fwrite(&now.tv_sec, sizeof(now.tv_sec), 1, context.outfile);
+                fwrite(recvaddr, sizeof(*recvaddr), 1, context.outfile);
+                fwrite(&short_len, sizeof(short_len), 1, context.outfile);
+                fwrite(offset, short_len, 1, context.outfile);
+                break;
+            case OUTPUT_LIST:
+                if (packet.head.header.rcode == DNS_RCODE_NOERROR
+                && (packet.head.header.ans_count > 0 || context.format.list_write_zero_answers)) {
+                    buf = dns_name2str(&packet.head.question.name);
+                    size_t name_len = strlen(buf);
+                    if(name_len > 0 && buf[name_len - 1] == '.') {
+                        buf[name_len - 1] = '\0';
                     }
-                    break;
+                    fprintf(context.outfile, "%s\n", buf);
+                }
+                break;
 
-                case OUTPUT_TEXT_FULL: // Print packet similar to dig style
-                    // Resolver and timestamp are not part of the packet, we therefore have to print it manually
-                    fprintf(context.outfile, ";; Server: %s\n;; Size: %" PRIu16 "\n;; Unix time: %lu\n",
-                            sockaddr2str(recvaddr), short_len, now.tv_sec);
-                    dns_print_packet(context.outfile, &packet, offset, len, next);
-                    break;
+            case OUTPUT_TEXT_FULL: // Print packet similar to dig style
+                // Resolver and timestamp are not part of the packet, we therefore have to print it manually
+                fprintf(context.outfile, ";; Server: %s\n;; Size: %" PRIu16 "\n;; Unix time: %lu\n",
+                        sockaddr2str(recvaddr), short_len, now.tv_sec);
+                dns_print_packet(context.outfile, &packet, offset, len, next);
+                break;
 
-                case OUTPUT_NDJSON:
-                    if (context.format.only_with_answers_or_referrals && packet.head.header.ans_count == 0) {
-                        bool contains_referral = false;
-                        for (size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec)
-                                                   && rec_index < packet.head.header.ans_count +
-                                                                  packet.head.header.auth_count; rec_index++) {
-                            if (rec_index >= packet.head.header.ans_count && rec.type == DNS_REC_NS
-                                && dns_raw_names_eq(&rec.name, &packet.head.question.name)) {
-                                contains_referral = true;
-                            }
-                        }
-                        next = parse_offset;
-                        if (!contains_referral) {
-                            break;
+            case OUTPUT_NDJSON:
+                if (context.format.only_with_answers_or_referrals && packet.head.header.ans_count == 0)
+                {
+                    bool contains_referral = false;
+                    for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec)
+                        && rec_index < packet.head.header.ans_count + packet.head.header.auth_count; rec_index++)
+                    {
+                        if(rec_index >= packet.head.header.ans_count && rec.type == DNS_REC_NS
+                            && dns_raw_names_eq(&rec.name, &packet.head.question.name))
+                        {
+                            contains_referral = true;
                         }
                     }
-                    json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
+                    next = parse_offset;
+                    if(!contains_referral)
+                    {
+                        break;
+                    }
+                }
+                json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&packet.head.question.name));
+                fprintf(context.outfile,
+                        "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\","
+                        "\"rx_ts\":%lu%09lu,\"data\":{",
+                        json_buffer,
+                        dns_record_type2str((dns_record_type) packet.head.question.type),
+                        dns_class2str((dns_class) packet.head.question.class),
+                        dns_rcode2str((dns_rcode) packet.head.header.rcode),
+                        now.tv_sec, now.tv_nsec);
+                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++, section_index++)
+                {
+                    if(section == DNS_SECTION_ANSWER && section_index >= packet.head.header.ans_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section == DNS_SECTION_AUTHORITY && section_index >= packet.head.header.auth_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section == DNS_SECTION_ADDITIONAL && section_index >= packet.head.header.add_count) {
+                        section_index = 0;
+                        section++;
+                    }
+                    if(section_index == 0) {
+                        fprintf(context.outfile, "%s\"%s\":[", section_emitted ? "]," : "",
+                                dns_section2str_lower_plural(section));
+                    }
+                    else
+                    {
+                        fputs(",", context.outfile);
+                    }
+                    json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&rec.name));
+
                     fprintf(context.outfile,
-                            "{\"name\":\"%s\",\"type\":\"%s\",\"class\":\"%s\",\"status\":\"%s\","
-                            "\"rx_ts\":%lu%09lu,\"data\":{",
-                            json_buffer,
-                            dns_record_type2str((dns_record_type) packet.head.question.type),
-                            dns_class2str((dns_class) packet.head.question.class),
-                            dns_rcode2str((dns_rcode) packet.head.header.rcode),
-                            now.tv_sec, now.tv_nsec);
-                    for (size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next,
-                                                                    &rec); rec_index++, section_index++) {
-                        if (section == DNS_SECTION_ANSWER && section_index >= packet.head.header.ans_count) {
-                            section_index = 0;
-                            section++;
-                        }
-                        if (section == DNS_SECTION_AUTHORITY && section_index >= packet.head.header.auth_count) {
-                            section_index = 0;
-                            section++;
-                        }
-                        if (section == DNS_SECTION_ADDITIONAL && section_index >= packet.head.header.add_count) {
-                            section_index = 0;
-                            section++;
-                        }
-                        if (section_index == 0) {
-                            fprintf(context.outfile, "%s\"%s\":[", section_emitted ? "]," : "",
-                                    dns_section2str_lower_plural(section));
-                        } else {
-                            fputs(",", context.outfile);
-                        }
-                        json_escape_str(json_buffer, sizeof(json_buffer), dns_name2str(&rec.name));
+                            "{\"ttl\":%" PRIu32 ",\"type\":\"%s\",\"class\":\"%s\",\"name\":\"%s\",\"data\":\"",
+                            rec.ttl,
+                            dns_record_type2str((dns_record_type) rec.type),
+                            dns_class2str((dns_class) rec.class),
+                            json_buffer);
+                    section_emitted = true;
+                    json_escape_str(json_buffer, sizeof(json_buffer),
+                                    dns_raw_record_data2str(&rec, offset, offset + short_len, false));
+                    fputs(json_buffer, context.outfile);
+                    fprintf(context.outfile, "\"}");
+                }
 
+
+
+                fprintf(context.outfile, "%s},\"flags\":[", section_emitted ? "]" : "");
+                static char json_flags[64];
+                int written = sprintf(json_flags, "%s%s%s%s%s%s",
+                        packet.head.header.aa ? "\"aa\"," : "",
+                        packet.head.header.tc ? "\"tc\"," : "",
+                        packet.head.header.rd ? "\"rd\"," : "",
+                        packet.head.header.ra ? "\"ra\"," : "",
+                        packet.head.header.ad ? "\"ad\"," : "",
+                        packet.head.header.cd ? "\"cd\"," : "");
+                if(written > 0)
+                {
+                    json_flags[written - 1] = 0;
+                }
+                fprintf(context.outfile, "%s],\"resolver\":\"%s\",\"proto\":\"%s\"}\n", json_flags,
+                        sockaddr2str(recvaddr), lookup->use_tcp ? "TCP" : "UDP");
+
+                break;
+
+            case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
+                if(context.format.print_question)
+                {
+                    if(!context.format.include_meta)
+                    {
                         fprintf(context.outfile,
-                                "{\"ttl\":%" PRIu32 ",\"type\":\"%s\",\"class\":\"%s\",\"name\":\"%s\",\"data\":\"",
+                                "%s %s %s\n",
+                                dns_name2str(&packet.head.question.name),
+                                context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
+                                dns_record_type2str((dns_record_type) packet.head.question.type));
+                    }
+                    else
+                    {
+                        fprintf(context.outfile,
+                                "%s %lu %s %s %s %s\n",
+                                sockaddr2str(recvaddr),
+                                now.tv_sec,
+                                dns_rcode2str((dns_rcode)packet.head.header.rcode),
+                                dns_name2str(&packet.head.question.name),
+                                context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
+                                dns_record_type2str((dns_record_type) packet.head.question.type));
+                    }
+                }
+                for(size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next, &rec); rec_index++)
+                {
+                    char *section_separator = "";
+                    if(rec_index >= packet.head.header.ans_count)
+                    {
+                        if(rec_index >= non_add_count)
+                        {
+                            // We are entering a new section
+                            if(context.format.separate_sections && section != DNS_SECTION_ADDITIONAL)
+                            {
+                                section_separator = "\n";
+                            }
+                            section = DNS_SECTION_ADDITIONAL;
+                        }
+                        else
+                        {
+                            // We are entering a new section
+                            if(context.format.separate_sections && section != DNS_SECTION_AUTHORITY)
+                            {
+                                section_separator = "\n";
+                            }
+                            section = DNS_SECTION_AUTHORITY;
+                        }
+                    }
+
+                    if((context.format.match_name && !dns_raw_names_eq(&rec.name, &packet.head.question.name))
+                            || !context.format.sections[section])
+                    {
+                        continue;
+                    }
+                    if(!context.format.ttl)
+                    {
+                        fprintf(context.outfile,
+                                "%s%s%s %s %s\n",
+                                section_separator,
+                                context.format.indent_sections ? "\t" : "",
+                                dns_name2str(&rec.name),
+                                dns_record_type2str((dns_record_type) rec.type),
+                                dns_raw_record_data2str(&rec, offset, offset + short_len, true));
+                    }
+                    else
+                    {
+                        fprintf(context.outfile,
+                                "%s%s%s %s %" PRIu32 " %s %s\n",
+                                section_separator,
+                                context.format.indent_sections ? "\t" : "",
+                                dns_name2str(&rec.name),
+                                dns_class2str((dns_class)rec.class),
                                 rec.ttl,
                                 dns_record_type2str((dns_record_type) rec.type),
-                                dns_class2str((dns_class) rec.class),
-                                json_buffer);
-                        section_emitted = true;
-                        json_escape_str(json_buffer, sizeof(json_buffer),
-                                        dns_raw_record_data2str(&rec, offset, offset + short_len, false));
-                        fputs(json_buffer, context.outfile);
-                        fprintf(context.outfile, "\"}");
+                                dns_raw_record_data2str(&rec, offset, offset + short_len, true));
                     }
-
-
-                    fprintf(context.outfile, "%s},\"flags\":[", section_emitted ? "]" : "");
-                    static char json_flags[64];
-                    int written = sprintf(json_flags, "%s%s%s%s%s%s",
-                                          packet.head.header.aa ? "\"aa\"," : "",
-                                          packet.head.header.tc ? "\"tc\"," : "",
-                                          packet.head.header.rd ? "\"rd\"," : "",
-                                          packet.head.header.ra ? "\"ra\"," : "",
-                                          packet.head.header.ad ? "\"ad\"," : "",
-                                          packet.head.header.cd ? "\"cd\"," : "");
-                    if (written > 0) {
-                        json_flags[written - 1] = 0;
-                    }
-                    fprintf(context.outfile, "%s],\"resolver\":\"%s\",\"proto\":\"%s\"}\n", json_flags,
-                            sockaddr2str(recvaddr), lookup->use_tcp ? "TCP" : "UDP");
-
-                    break;
-
-                case OUTPUT_TEXT_SIMPLE: // Only print records from answer section that match the query name
-                    if (context.format.print_question) {
-                        if (!context.format.include_meta) {
-                            fprintf(context.outfile,
-                                    "%s %s %s\n",
-                                    dns_name2str(&packet.head.question.name),
-                                    context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
-                                    dns_record_type2str((dns_record_type) packet.head.question.type));
-                        } else {
-                            fprintf(context.outfile,
-                                    "%s %lu %s %s %s %s\n",
-                                    sockaddr2str(recvaddr),
-                                    now.tv_sec,
-                                    dns_rcode2str((dns_rcode) packet.head.header.rcode),
-                                    dns_name2str(&packet.head.question.name),
-                                    context.format.ttl ? dns_class2str((dns_class) packet.head.question.class) : "",
-                                    dns_record_type2str((dns_record_type) packet.head.question.type));
-                        }
-                    }
-                    for (size_t rec_index = 0; dns_parse_record_raw(offset, next, offset + len, &next,
-                                                                    &rec); rec_index++) {
-                        char *section_separator = "";
-                        if (rec_index >= packet.head.header.ans_count) {
-                            if (rec_index >= non_add_count) {
-                                // We are entering a new section
-                                if (context.format.separate_sections && section != DNS_SECTION_ADDITIONAL) {
-                                    section_separator = "\n";
-                                }
-                                section = DNS_SECTION_ADDITIONAL;
-                            } else {
-                                // We are entering a new section
-                                if (context.format.separate_sections && section != DNS_SECTION_AUTHORITY) {
-                                    section_separator = "\n";
-                                }
-                                section = DNS_SECTION_AUTHORITY;
-                            }
-                        }
-
-                        if ((context.format.match_name && !dns_raw_names_eq(&rec.name, &packet.head.question.name))
-                            || !context.format.sections[section]) {
-                            continue;
-                        }
-                        if (!context.format.ttl) {
-                            fprintf(context.outfile,
-                                    "%s%s%s %s %s\n",
-                                    section_separator,
-                                    context.format.indent_sections ? "\t" : "",
-                                    dns_name2str(&rec.name),
-                                    dns_record_type2str((dns_record_type) rec.type),
-                                    dns_raw_record_data2str(&rec, offset, offset + short_len, true));
-                        } else {
-                            fprintf(context.outfile,
-                                    "%s%s%s %s %" PRIu32 " %s %s\n",
-                                    section_separator,
-                                    context.format.indent_sections ? "\t" : "",
-                                    dns_name2str(&rec.name),
-                                    dns_class2str((dns_class) rec.class),
-                                    rec.ttl,
-                                    dns_record_type2str((dns_record_type) rec.type),
-                                    dns_raw_record_data2str(&rec, offset, offset + short_len, true));
-                        }
-                    }
-                    if (context.format.separate_queries) {
-                        fprintf(context.outfile, "\n");
-                    }
-                    break;
-            }
+                }
+                if(context.format.separate_queries)
+                {
+                    fprintf(context.outfile, "\n");
+                }
+                break;
         }
 
         lookup_done(lookup);
