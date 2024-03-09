@@ -114,6 +114,7 @@ typedef struct
         tcp_data_tracker_t *window_tracker;
         bool terminated;
     } tcp_state;
+    size_t count;
 } lookup_t;
 
 typedef enum
