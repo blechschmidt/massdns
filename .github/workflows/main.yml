@@ -1,0 +1,20 @@
+name: main
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run CMake
+      run: cmake -S . -B build -D CMAKE_BUILD_TYPE=Debug
+
+    - name: build
+      run: cmake --build build
