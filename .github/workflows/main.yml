@@ -13,6 +13,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get install libpcap-dev
+
     - name: Run CMake
       run: cmake -S . -B build -D CMAKE_BUILD_TYPE=Debug
 
