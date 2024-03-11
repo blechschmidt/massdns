@@ -1,0 +1,25 @@
+name: main
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get install libpcap-dev
+
+    - name: Run CMake
+      run: cmake -S . -B build -D CMAKE_BUILD_TYPE=Debug
+
+    - name: build
+      run: cmake --build build
