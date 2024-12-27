@@ -1,8 +1,10 @@
 FROM alpine:edge
 
+COPY . /massdns
+
 RUN apk --no-cache --virtual .build-deps add git build-base \
-   && git clone --depth=1 https://github.com/blechschmidt/massdns.git \
-   && cd massdns && make && apk del .build-deps
+   && cd /massdns && make && apk del .build-deps
+
 
 WORKDIR /massdns/
 

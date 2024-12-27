@@ -984,7 +984,7 @@ void tcp_connect(lookup_t *lookup)
         {
             struct sockaddr_in6 src_addr;
             srcrand_random_addr(&src_addr);
-            if(bind(tcp_socket, &src_addr, sizeof(src_addr)) != 0)
+            if(bind(tcp_socket, (struct sockaddr*)&src_addr, sizeof(src_addr)) != 0)
             {
                 log_msg(LOG_ERROR, "Failed to bind TCP socket: %s\n", strerror(errno));
             }
