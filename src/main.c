@@ -2296,7 +2296,7 @@ void run()
         context.domainfile = fopen(context.cmd_args.domains, "r");
         if (context.domainfile == NULL)
         {
-            log_msg(LOG_ERROR, "Failed to open domain file \"%s\".\n", context.cmd_args.domains);
+            log_msg(LOG_ERROR, "Failed to open domain file \"%s\": %s\n", context.cmd_args.domains, strerror(errno));
             clean_exit(EXIT_FAILURE);
         }
     }
@@ -2914,7 +2914,7 @@ void parse_cmd(int argc, char **argv)
                     context.domainfile = fopen(context.cmd_args.domains, "r");
                     if (context.domainfile == NULL)
                     {
-                        log_msg(LOG_ERROR, "Failed to open domain file \"%s\".\n", argv[i]);
+                        log_msg(LOG_ERROR, "Failed to open domain file \"%s\": %s.\n", argv[i], strerror(errno));
                         clean_exit(EXIT_FAILURE);
                     }
                     if(fseek(context.domainfile, 0, SEEK_END) != 0)
