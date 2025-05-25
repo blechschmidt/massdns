@@ -32,6 +32,8 @@
 #define LOG_ERROR 3
 
 #define LOGLEVEL LOG_WARN
+#define MAX_RANDOM_V6_ADDRESSES 10000
+
 
 const uint32_t OUTPUT_BINARY_VERSION = 0x00;
 
@@ -256,7 +258,10 @@ typedef struct
     size_t fork_index;
     struct {
         bool enabled;
+        bool read_from_file;
         struct sockaddr_storage src_range;
+        int available_random_v6_addresses;
+        struct sockaddr_in6 loaded_v6_address[MAX_RANDOM_V6_ADDRESSES];
     } srcrand;
     struct
     {
