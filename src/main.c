@@ -887,17 +887,17 @@ int load_random_addr(char* file_name)
 
         if (inet_pton(AF_INET6, ipv6_str, &context.srcrand.loaded_v6_address[count].sin6_addr) <= 0)
         {
-            fprintf(stderr, "Ignoring invalid IPv6 address: %s\n", ipv6_str);
+            log_msg(LOG_ERROR, "Ignoring invalid random source IPv6 address: %s\n", ipv6_str);
             continue;
         }
 
         context.srcrand.loaded_v6_address[count].sin6_family = AF_INET6;
-        context.srcrand.loaded_v6_address[count].sin6_port = htons(0); // Set to 0 or desired port
+        context.srcrand.loaded_v6_address[count].sin6_port = htons(0);
 
         count++;
         if (count >= MAX_RANDOM_V6_ADDRESSES)
         {
-            fprintf(stderr, "Reached maximum random IPv6 address limit\n");
+            log_msg(LOG_ERROR, "Reached maximum random IPv6 address limit\n", ipv6_str);
             break;
         }
     }
