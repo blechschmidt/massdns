@@ -15,39 +15,40 @@ If you are not on Linux, run `make nolinux`. On Windows, the [Cygwin](https://cy
 ## Usage
 ```
 Usage: ./bin/massdns [options] [domainlist]
-  -b  --bindto           Bind to IP address and port. (Default: 0.0.0.0:0)
-      --busy-poll        Use busy-wait polling instead of epoll.
-  -c  --resolve-count    Number of resolves for a name before giving up. (Default: 50)
-      --drop-group       Group to drop privileges to when running as root. (Default: nogroup)
-      --drop-user        User to drop privileges to when running as root. (Default: nobody)
-      --extended-input   Input names are followed by a space-separated list of resolvers.
-                         These are used before falling back to the resolvers file.
-      --filter           Only output packets with the specified response code.
-      --flush            Flush the output file whenever a response was received.
-  -h  --help             Show this help.
-      --ignore           Do not output packets with the specified response code.
-  -i  --interval         Interval in milliseconds to wait between multiple resolves of the same
-                         domain. (Default: 500)
-  -l  --error-log        Error log file path. (Default: /dev/stderr)
-      --norecurse        Use non-recursive queries. Useful for DNS cache snooping.
-  -o  --output           Flags for output formatting.
-      --predictable      Use resolvers incrementally. Useful for resolver tests.
-      --processes        Number of processes to be used for resolving. (Default: 1)
-  -q  --quiet            Quiet mode.
-      --rand-src-ipv6    Use a random IPv6 address from the specified subnet for each query.
-      --rcvbuf           Size of the receive buffer in bytes.
-      --retry            Unacceptable DNS response codes.
-                         (Default: All codes but NOERROR or NXDOMAIN)
-  -r  --resolvers        Text file containing DNS resolvers.
-      --root             Do not drop privileges when running as root. Not recommended.
-  -s  --hashmap-size     Number of concurrent lookups. (Default: 10000)
-      --sndbuf           Size of the send buffer in bytes.
-      --status-format    Format for real-time status updates, json or ansi (Default: ansi)
-      --sticky           Do not switch the resolver when retrying.
-      --socket-count     Socket count per process. (Default: 1)
-  -t  --type             Record type to be resolved. (Default: A)
-      --verify-ip        Verify IP addresses of incoming replies.
-  -w  --outfile          Write to the specified output file instead of standard output.
+  -b  --bindto             Bind to IP address and port. (Default: 0.0.0.0:0)
+      --busy-poll          Use busy-wait polling instead of epoll.
+  -c  --resolve-count      Number of resolves for a name before giving up. (Default: 50)
+      --drop-group         Group to drop privileges to when running as root. (Default: nogroup)
+      --drop-user          User to drop privileges to when running as root. (Default: nobody)
+      --extended-input     Input names are followed by a space-separated list of resolvers.
+                           These are used before falling back to the resolvers file.
+      --filter             Only output packets with the specified response code.
+      --flush              Flush the output file whenever a response was received.
+  -h  --help               Show this help.
+      --ignore             Do not output packets with the specified response code.
+  -i  --interval           Interval in milliseconds to wait between multiple resolves of the same
+                           domain. (Default: 500)
+  -l  --error-log          Error log file path. (Default: /dev/stderr)
+      --norecurse          Use non-recursive queries. Useful for DNS cache snooping.
+  -o  --output             Flags for output formatting.
+      --predictable        Use resolvers incrementally. Useful for resolver tests.
+      --processes          Number of processes to be used for resolving. (Default: 1)
+  -q  --quiet              Quiet mode.
+      --rand-src-ipv6      Use a random IPv6 address from the specified subnet for each query.
+      --rand-src-ipv6-file Use a random IPv6 address from the specified file.
+      --rcvbuf             Size of the receive buffer in bytes.
+      --retry              Unacceptable DNS response codes.
+                           (Default: All codes but NOERROR or NXDOMAIN)
+  -r  --resolvers          Text file containing DNS resolvers.
+      --root               Do not drop privileges when running as root. Not recommended.
+  -s  --hashmap-size       Number of concurrent lookups. (Default: 10000)
+      --sndbuf             Size of the send buffer in bytes.
+      --status-format      Format for real-time status updates, json or ansi (Default: ansi)
+      --sticky             Do not switch the resolver when retrying.
+      --socket-count       Socket count per process. (Default: 1)
+  -t  --type               Record type to be resolved. (Default: A)
+      --verify-ip          Verify IP addresses of incoming replies.
+  -w  --outfile            Write to the specified output file instead of standard output.
 
 Output flags:
   L - domain list output
