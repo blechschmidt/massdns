@@ -260,7 +260,7 @@ typedef struct
         bool enabled;
         bool read_from_file;
         struct sockaddr_storage src_range;
-        int available_random_v6_addresses;
+        size_t available_random_v6_addresses;
         struct sockaddr_in6 loaded_v6_address[MAX_RANDOM_V6_ADDRESSES];
     } srcrand;
     struct

@@ -209,8 +209,6 @@ void cleanup()
     free(context.sockets.raw_send6.data);
     free(context.sockets.raw_receive.data);
 
-    urandom_close();
-
     if(context.domainfile)
     {
         fclose(context.domainfile);
@@ -869,16 +867,17 @@ void tcp_connected(socket_info_t *socket_info)
 #endif
 
 
-int load_random_addr(char* file_name)
+void load_random_addr(char* filename)
 {
     char ipv6_str[INET6_ADDRSTRLEN];
     FILE *file;
-    int count = 0;
+    size_t count = 0;
 
-    file = fopen(file_name, "r");
+    file = fopen(filename, "r");
     if (file == NULL)
     {
-        return EXIT_FAILURE;
+        log_msg(LOG_ERROR, "Failed to open random ipv6 source file: %s\n", filename);
+        clean_exit(EXIT_FAILURE);
     }
 
     while (fgets(ipv6_str, sizeof(ipv6_str), file) != NULL)
@@ -891,22 +890,27 @@ int load_random_addr(char* file_name)
             continue;
         }
 
+        if (count >= MAX_RANDOM_V6_ADDRESSES)
+        {
+            log_msg(LOG_ERROR, "Reached maximum random IPv6 address limit\n");
+            break;
+        }
+
         context.srcrand.loaded_v6_address[count].sin6_family = AF_INET6;
         context.srcrand.loaded_v6_address[count].sin6_port = htons(0);
 
         count++;
-        if (count >= MAX_RANDOM_V6_ADDRESSES)
-        {
-            log_msg(LOG_ERROR, "Reached maximum random IPv6 address limit\n", ipv6_str);
-            break;
-        }
     }
 
     context.srcrand.available_random_v6_addresses = count;
 
     fclose(file);
 
-    return 0;
+    if (count == 0)
+    {
+        log_msg(LOG_ERROR, "No valid random IPv6 addresses found in file: %s\n", filename);
+        clean_exit(EXIT_FAILURE);
+    }
 }
 
 
@@ -927,18 +931,18 @@ void srcrand_random_addr_from_range(struct sockaddr_in6 *addr)
 
 void srcrand_random_addr_from_file(struct sockaddr_in6 *addr)
 {
-    if (context.srcrand.available_random_v6_addresses > 0)
-    {
-        struct sockaddr_in6 raddr = context.srcrand.loaded_v6_address[urandom_get_int(0, context.srcrand.available_random_v6_addresses - 1)];
-        memcpy(addr, &raddr, sizeof(*addr));
-    }
+    struct sockaddr_in6 *raddr = &context.srcrand.loaded_v6_address[urandom_size_t_max(context.srcrand.available_random_v6_addresses)];
+    memcpy(addr, raddr, sizeof(*addr));
 }
 
 void srcrand_random_addr(struct sockaddr_in6 *addr)
 {
-    if(context.srcrand.read_from_file){
+    if(context.srcrand.read_from_file)
+    {
         srcrand_random_addr_from_file(addr);
-    }else{
+    }
+    else
+    {
         srcrand_random_addr_from_range(addr);
     }
 }
@@ -1097,7 +1101,7 @@ void pick_resolver(lookup_t *lookup)
         }
         else
         {
-            lookup->resolver = ((resolver_t *) context.resolvers.data) + urandom_size_t() % context.resolvers.len;
+            lookup->resolver = ((resolver_t *) context.resolvers.data) + urandom_size_t_max(context.resolvers.len);
         }
     }
 }
@@ -1132,7 +1136,7 @@ void send_query(lookup_t *lookup)
     {
         // Pick a random socket from that pool
         // Pool of sockets cannot be empty due to check when parsing resolvers. Socket creation must have succeeded.
-        size_t socket_index = urandom_size_t() % interfaces->len;
+        size_t socket_index = urandom_size_t_max(interfaces->len);
         lookup->socket = ((socket_info_t *) interfaces->data) + socket_index;
     }
 
@@ -2721,12 +2725,6 @@ void parse_cmd(int argc, char **argv)
                 clean_exit(EXIT_FAILURE);
             }
             char *rand_ipv6_addr_file_name = argv[++i];
-            FILE *file = fopen(rand_ipv6_addr_file_name, "r");
-            if (file == NULL)
-            {
-                log_msg(LOG_ERROR, "Failed to open random ipv6 source file: %s\n",rand_ipv6_addr_file_name);
-                clean_exit(EXIT_FAILURE);
-            }
 
             context.srcrand.enabled = true;
             context.srcrand.read_from_file = true;

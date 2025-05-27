@@ -5,8 +5,7 @@
 
 #include <stdio.h>
 #include <stdbool.h>
-
-static FILE *randomness;
+#include <stdint.h>
 
 uint64_t wyhash64_x; /* The state can be seeded with any value. */
 
@@ -52,25 +51,15 @@ size_t urandom_size_t()
     return result;
 }
 
-int urandom_close()
+size_t urandom_size_t_max(size_t max)
 {
-    if(!randomness)
-    {
-        return 0;
-    }
-    return fclose(randomness);
-}
-
-int urandom_get_int(int min, int max)
-{
-    int n = max - min + 1;
-    int remainder = RAND_MAX % n;
-    int x;
+    size_t result;
     do
     {
-        x = rand();
-    } while (x >= RAND_MAX - remainder);
-    return min + x % n;
+        urandom_get(&result, sizeof(result));
+    }
+    while (result >= (SIZE_MAX - SIZE_MAX % max));
+    return result % max;
 }
 
 #endif //MASSRESOLVER_RANDOM_H
