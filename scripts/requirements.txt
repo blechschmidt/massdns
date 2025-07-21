@@ -1,1 +1,3 @@
 requests
+dnspython
+psutil
