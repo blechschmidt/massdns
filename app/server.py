@@ -4,9 +4,9 @@ import signal
 import subprocess
 import tempfile
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, render_template, request
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates", static_folder="static")
 
 MASSDNS_BIN = os.environ.get("MASSDNS_BIN", "/massdns/bin/massdns")
 RESOLVERS = os.environ.get("RESOLVERS", "/massdns/lists/resolvers.txt")
@@ -19,9 +19,28 @@ ALLOWED_TYPES = {
 
 @app.get("/")
 def index():
+    accept = (request.headers.get("Accept") or "").lower()
+    wants_json = "application/json" in accept and "text/html" not in accept
+    if wants_json:
+        return _api_info()
+    return render_template(
+        "index.html",
+        max_domains=MAX_DOMAINS,
+        allowed_types=sorted(ALLOWED_TYPES),
+    )
+
+
+@app.get("/api")
+def api_info():
+    return _api_info()
+
+
+def _api_info():
     return jsonify({
         "service": "massdns-api",
         "endpoints": {
+            "GET /": "web UI",
+            "GET /api": "this info",
             "GET /healthz": "liveness",
             "POST /resolve": "resolve domains, streams ndjson",
         },

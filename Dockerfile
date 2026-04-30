@@ -18,6 +18,8 @@ RUN mkdir -p /massdns/bin /massdns/lists
 COPY --from=build /src/bin/massdns /massdns/bin/massdns
 COPY lists/resolvers.txt /massdns/lists/resolvers.txt
 COPY app/server.py /app/server.py
+COPY app/templates /app/templates
+COPY app/static /app/static
 
 ENV PORT=8080 \
     MASSDNS_BIN=/massdns/bin/massdns \
