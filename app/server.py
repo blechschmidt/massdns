@@ -37,7 +37,7 @@ def api_info():
 
 def _api_info():
     return jsonify({
-        "service": "massdns-api",
+        "service": "radiodns",
         "endpoints": {
             "GET /": "web UI",
             "GET /api": "this info",
