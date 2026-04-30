@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/logo.svg" alt="massdns" width="180" />
+</p>
+
 # MassDNS
 ## A high-performance DNS stub resolver
 

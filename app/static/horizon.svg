@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" width="1600" height="900">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0c0032"/>
+      <stop offset="55%" stop-color="#190061"/>
+      <stop offset="78%" stop-color="#ff2afc"/>
+      <stop offset="100%" stop-color="#ff8c42"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#fffb96"/>
+      <stop offset="40%" stop-color="#ff71ce"/>
+      <stop offset="100%" stop-color="#b967ff"/>
+    </linearGradient>
+    <linearGradient id="grid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#01cdfe" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ff2afc" stop-opacity="0.6"/>
+    </linearGradient>
+    <mask id="sun-mask">
+      <rect width="1600" height="900" fill="black"/>
+      <circle cx="800" cy="440" r="280" fill="white"/>
+    </mask>
+    <filter id="g" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#sky)"/>
+
+  <g fill="#ffffff" opacity="0.55">
+    <circle cx="120" cy="80"  r="1.6"/>
+    <circle cx="260" cy="160" r="1.2"/>
+    <circle cx="430" cy="60"  r="1.6"/>
+    <circle cx="640" cy="120" r="1"/>
+    <circle cx="980" cy="60"  r="1.4"/>
+    <circle cx="1180" cy="160" r="1"/>
+    <circle cx="1340" cy="100" r="1.4"/>
+    <circle cx="1490" cy="200" r="1"/>
+    <circle cx="80" cy="280" r="1"/>
+    <circle cx="1520" cy="320" r="1.2"/>
+  </g>
+
+  <circle cx="800" cy="440" r="280" fill="url(#sun)"/>
+  <g mask="url(#sun-mask)">
+    <rect x="0" y="478" width="1600" height="14" fill="#0c0032" opacity="0.85"/>
+    <rect x="0" y="510" width="1600" height="20" fill="#0c0032" opacity="0.85"/>
+    <rect x="0" y="548" width="1600" height="26" fill="#0c0032" opacity="0.85"/>
+    <rect x="0" y="592" width="1600" height="32" fill="#0c0032" opacity="0.85"/>
+    <rect x="0" y="640" width="1600" height="40" fill="#0c0032" opacity="0.85"/>
+  </g>
+
+  <rect x="0" y="660" width="1600" height="3" fill="#ff71ce" opacity="0.95"/>
+  <rect x="0" y="664" width="1600" height="10" fill="#ff71ce" opacity="0.25"/>
+
+  <g stroke="url(#grid)" stroke-width="1.6" fill="none" filter="url(#g)">
+    <line x1="0" y1="700" x2="1600" y2="700" opacity="0.9"/>
+    <line x1="0" y1="730" x2="1600" y2="730" opacity="0.9"/>
+    <line x1="0" y1="765" x2="1600" y2="765" opacity="0.9"/>
+    <line x1="0" y1="805" x2="1600" y2="805" opacity="0.9"/>
+    <line x1="0" y1="850" x2="1600" y2="850" opacity="0.9"/>
+    <line x1="0" y1="900" x2="1600" y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="-600" y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="-200" y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="180"  y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="450"  y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="660"  y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="800"  y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="940"  y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="1150" y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="1420" y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="1800" y2="900" opacity="0.9"/>
+    <line x1="800" y1="660" x2="2200" y2="900" opacity="0.9"/>
+  </g>
+</svg>
