@@ -44,13 +44,21 @@ stays open until massdns finishes; `-N` (curl no-buffer) is recommended.
 ## Local development
 
 ```bash
-docker build -f Dockerfile.app -t massdns-api .
+docker build -t massdns-api .
 docker run --rm -p 8080:8080 massdns-api
+```
+
+The original CLI image (entrypoint = the `massdns` binary) is still
+available at `Dockerfile.cli`:
+
+```bash
+docker build -f Dockerfile.cli -t massdns-cli .
+docker run --rm massdns-cli -r lists/resolvers.txt -t A domains.txt
 ```
 
 ## Deploy to DigitalOcean App Platform
 
-The repo ships a `.do/app.yaml` app spec that builds from `Dockerfile.app`.
+The repo ships a `.do/app.yaml` app spec that builds from `Dockerfile`.
 
 1. Edit `.do/app.yaml` if your fork lives at a different `github.repo` or
    `branch` (default: `chelstein/massdns` on `main`).
