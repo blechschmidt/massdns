@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="massdns vaporwave logo">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0c0032"/>
+      <stop offset="55%" stop-color="#190061"/>
+      <stop offset="80%" stop-color="#ff2afc"/>
+      <stop offset="100%" stop-color="#ff8c42"/>
+    </linearGradient>
+
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#fffb96"/>
+      <stop offset="40%" stop-color="#ff71ce"/>
+      <stop offset="100%" stop-color="#b967ff"/>
+    </linearGradient>
+
+    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#01cdfe"/>
+      <stop offset="60%" stop-color="#ff71ce"/>
+      <stop offset="100%" stop-color="#7b00ff"/>
+    </linearGradient>
+
+    <linearGradient id="grid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#01cdfe" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ff2afc" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <mask id="sun-mask">
+      <rect width="512" height="512" fill="black"/>
+      <circle cx="256" cy="220" r="150" fill="white"/>
+    </mask>
+
+    <clipPath id="frame-clip">
+      <rect x="16" y="16" width="480" height="480" rx="56"/>
+    </clipPath>
+
+    <filter id="soft-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g clip-path="url(#frame-clip)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+
+    <!-- distant stars -->
+    <g fill="#ffffff" opacity="0.6">
+      <circle cx="60"  cy="60"  r="1.4"/>
+      <circle cx="120" cy="40"  r="1"/>
+      <circle cx="200" cy="80"  r="1.6"/>
+      <circle cx="320" cy="50"  r="1"/>
+      <circle cx="430" cy="90"  r="1.4"/>
+      <circle cx="470" cy="40"  r="1"/>
+      <circle cx="80"  cy="160" r="1"/>
+      <circle cx="380" cy="140" r="1.2"/>
+      <circle cx="40"  cy="220" r="1"/>
+    </g>
+
+    <!-- sun -->
+    <circle cx="256" cy="220" r="150" fill="url(#sun)"/>
+
+    <!-- horizontal sun stripes (Miami sun) -->
+    <g mask="url(#sun-mask)">
+      <rect x="0" y="240" width="512" height="10" fill="#0c0032" opacity="0.85"/>
+      <rect x="0" y="262" width="512" height="14" fill="#0c0032" opacity="0.85"/>
+      <rect x="0" y="290" width="512" height="18" fill="#0c0032" opacity="0.85"/>
+      <rect x="0" y="322" width="512" height="22" fill="#0c0032" opacity="0.85"/>
+      <rect x="0" y="358" width="512" height="28" fill="#0c0032" opacity="0.85"/>
+    </g>
+
+    <!-- horizon line glow -->
+    <rect x="0" y="356" width="512" height="2" fill="#ff71ce" opacity="0.9"/>
+    <rect x="0" y="358" width="512" height="6" fill="#ff71ce" opacity="0.25"/>
+
+    <!-- perspective grid floor -->
+    <g stroke="url(#grid)" stroke-width="1.4" fill="none" filter="url(#soft-glow)">
+      <!-- horizontal floor lines -->
+      <line x1="0"   y1="380" x2="512" y2="380" opacity="0.85"/>
+      <line x1="0"   y1="404" x2="512" y2="404" opacity="0.85"/>
+      <line x1="0"   y1="432" x2="512" y2="432" opacity="0.85"/>
+      <line x1="0"   y1="464" x2="512" y2="464" opacity="0.85"/>
+      <line x1="0"   y1="500" x2="512" y2="500" opacity="0.85"/>
+      <!-- perspective lines converging at vanishing point (256,360) -->
+      <line x1="256" y1="360" x2="-200" y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="-40"  y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="120"  y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="220"  y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="292"  y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="392"  y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="552"  y2="560" opacity="0.85"/>
+      <line x1="256" y1="360" x2="712"  y2="560" opacity="0.85"/>
+    </g>
+
+    <!-- lightning bolt over sun -->
+    <g filter="url(#soft-glow)">
+      <path d="M276 110 L210 240 L250 240 L228 340 L308 200 L264 200 L296 110 Z"
+            fill="url(#chrome)" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- frame border -->
+  <rect x="16" y="16" width="480" height="480" rx="56" fill="none"
+        stroke="url(#chrome)" stroke-width="4" opacity="0.85"/>
+</svg>
