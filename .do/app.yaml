@@ -2,7 +2,7 @@ name: massdns-api
 region: nyc
 services:
   - name: api
-    dockerfile_path: Dockerfile.app
+    dockerfile_path: Dockerfile
     source_dir: /
     github:
       repo: chelstein/massdns
