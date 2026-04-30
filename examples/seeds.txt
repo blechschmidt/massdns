@@ -1,0 +1,11 @@
+# Known FM RadioDNS bearers — handy as seeds for `expand-hits`.
+# Format: <freq5>.<pi>.<gcc>.fm.radiodns.org
+
+# Heart UK 106.2 MHz, PI C460, ECC E1 (GB)
+10620.c460.ce1.fm.radiodns.org
+
+# BBC Radio 1 98.8 MHz, PI C201, ECC E1 (GB)
+09880.c201.ce1.fm.radiodns.org
+
+# RTL France 104.3 MHz, PI F211, ECC E1 (FR)
+10430.f211.fe1.fm.radiodns.org
