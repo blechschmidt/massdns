@@ -1,0 +1,24 @@
+name: massdns-api
+region: nyc
+services:
+  - name: api
+    dockerfile_path: Dockerfile.app
+    source_dir: /
+    github:
+      repo: chelstein/massdns
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 10
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: MAX_DOMAINS
+        value: "10000"
+        scope: RUN_TIME

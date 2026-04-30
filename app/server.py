@@ -1,0 +1,151 @@
+import os
+import shlex
+import signal
+import subprocess
+import tempfile
+
+from flask import Flask, Response, jsonify, request
+
+app = Flask(__name__)
+
+MASSDNS_BIN = os.environ.get("MASSDNS_BIN", "/massdns/bin/massdns")
+RESOLVERS = os.environ.get("RESOLVERS", "/massdns/lists/resolvers.txt")
+MAX_DOMAINS = int(os.environ.get("MAX_DOMAINS", "10000"))
+ALLOWED_TYPES = {
+    "A", "AAAA", "ANY", "CNAME", "DNSKEY", "DS", "MX", "NS",
+    "NSEC", "PTR", "RRSIG", "SOA", "TXT", "CAA", "TLSA", "SRV",
+}
+
+
+@app.get("/")
+def index():
+    return jsonify({
+        "service": "massdns-api",
+        "endpoints": {
+            "GET /healthz": "liveness",
+            "POST /resolve": "resolve domains, streams ndjson",
+        },
+        "usage": {
+            "content_types": ["application/json", "text/plain"],
+            "json_body": {"domains": ["example.com", "..."], "type": "A"},
+            "plain_body": "one domain per line; ?type=A query string",
+            "max_domains": MAX_DOMAINS,
+            "allowed_types": sorted(ALLOWED_TYPES),
+        },
+    })
+
+
+@app.get("/healthz")
+def healthz():
+    if not os.path.exists(MASSDNS_BIN):
+        return jsonify({"status": "down", "reason": "massdns binary missing"}), 503
+    if not os.path.exists(RESOLVERS):
+        return jsonify({"status": "down", "reason": "resolvers file missing"}), 503
+    return jsonify({"status": "ok"})
+
+
+def _parse_domains():
+    record_type = "A"
+    domains = []
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        domains = data.get("domains") or []
+        record_type = (data.get("type") or request.args.get("type") or "A").upper()
+    else:
+        record_type = (request.args.get("type") or "A").upper()
+        body = request.get_data(as_text=True) or ""
+        domains = body.splitlines()
+
+    domains = [d.strip() for d in domains if d and d.strip()]
+    return domains, record_type
+
+
+@app.post("/resolve")
+def resolve():
+    domains, record_type = _parse_domains()
+
+    if not domains:
+        return jsonify({"error": "no domains provided"}), 400
+    if len(domains) > MAX_DOMAINS:
+        return jsonify({
+            "error": f"too many domains (max {MAX_DOMAINS})",
+            "received": len(domains),
+        }), 413
+    if record_type not in ALLOWED_TYPES:
+        return jsonify({
+            "error": f"unsupported record type: {record_type}",
+            "allowed": sorted(ALLOWED_TYPES),
+        }), 400
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", prefix="massdns-", delete=False
+    )
+    try:
+        tmp.write("\n".join(domains))
+        tmp.write("\n")
+        tmp.flush()
+        tmp.close()
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+    cmd = [
+        MASSDNS_BIN,
+        "-r", RESOLVERS,
+        "-t", record_type,
+        "-o", "Je",
+        "--root",
+        "-q",
+        tmp.name,
+    ]
+
+    def generate():
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=1,
+            preexec_fn=os.setsid,
+        )
+        try:
+            assert proc.stdout is not None
+            for line in iter(proc.stdout.readline, b""):
+                yield line
+        except GeneratorExit:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            raise
+        finally:
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                proc.wait()
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
+        "X-Massdns-Cmd": shlex.join(cmd),
+    }
+    return Response(generate(), mimetype="application/x-ndjson", headers=headers)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port)
