@@ -45,10 +45,20 @@ try:
     except OSError as _e:
         print(f"[startup] WARNING: cannot create RADIODNS_WORK={RADIODNS_WORK}: {_e}",
               file=sys.stderr, flush=True)
-    from rdns_routes import bp as rdns_bp  # noqa: E402
+    from rdns_routes import bp as rdns_bp, seed_db_if_empty  # noqa: E402
     app.register_blueprint(rdns_bp)
     print(f"[startup] radiodns blueprint registered (db={RADIODNS_DB})",
           file=sys.stderr, flush=True)
+    # Seed the SQLite DB with example stations on first boot so the
+    # Database tab and pipeline have something to operate on out of the
+    # box. Idempotent — skipped if candidate_domains already has rows.
+    try:
+        with app.app_context():
+            _seed_summary = seed_db_if_empty(RADIODNS_DB)
+        print(f"[startup] db seed: {_seed_summary}", file=sys.stderr, flush=True)
+    except Exception as _se:
+        print(f"[startup] db seed failed (non-fatal): {_se}",
+              file=sys.stderr, flush=True)
 except Exception as _e:
     RDNS_IMPORT_ERROR = "".join(traceback.format_exception(type(_e), _e, _e.__traceback__))
     print("[startup] FAILED to load radiodns blueprint:", file=sys.stderr, flush=True)
