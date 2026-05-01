@@ -69,9 +69,10 @@ def _ndjson(line: dict) -> bytes:
 
 
 def _ensure_db():
-    db = _cfg_db()
-    os.makedirs(os.path.dirname(os.path.abspath(db)) or ".", exist_ok=True)
-    with connect(db) as conn:
+    """Open the configured DB once to apply the schema. The underlying
+    db_compat.connect handles per-backend setup (including makedirs for
+    sqlite) so we don't duplicate it here."""
+    with connect(_cfg_db()) as conn:
         init_schema(conn)
 
 
