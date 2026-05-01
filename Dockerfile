@@ -22,6 +22,7 @@ COPY app/rdns_routes.py /app/rdns_routes.py
 COPY app/templates /app/templates
 COPY app/static /app/static
 COPY radiodns_mapper /app/radiodns_mapper
+COPY radiodns /app/radiodns
 
 ENV PORT=8080 \
     MASSDNS_BIN=/massdns/bin/massdns \

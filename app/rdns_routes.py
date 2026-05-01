@@ -1,6 +1,7 @@
 """Flask Blueprint exposing the radiodns_mapper pipeline over HTTP."""
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shlex
@@ -13,8 +14,8 @@ from flask import (Blueprint, Response, current_app, jsonify, request,
                    send_file, stream_with_context)
 
 from radiodns_mapper.generator import (
-    DEFAULT_STEP, FREQ_MAX, FREQ_MIN, iter_candidates, iter_expansion,
-    parse_ecc_list,
+    DEFAULT_STEP, FREQ_MAX, FREQ_MIN, build_fqdn, iter_candidates,
+    iter_expansion, parse_ecc_list, parse_freq,
 )
 from radiodns_mapper.models import CandidateDomain
 from radiodns_mapper.parsers import parse_cname_jsonl, parse_si_xml, parse_srv_jsonl
@@ -72,6 +73,92 @@ def _ensure_db():
     os.makedirs(os.path.dirname(os.path.abspath(db)) or ".", exist_ok=True)
     with connect(db) as conn:
         init_schema(conn)
+
+
+# --- seed --------------------------------------------------------------
+
+# Bundled example_stations.csv lives next to the radiodns_mapper package.
+_SEED_CANDIDATES = [
+    # (frequency_str, pi, ecc) — kept inline so the seed works even if the
+    # csv file isn't shipped with the image.
+    ("95.8", "c479", "e1"),    # Capital-class UK
+    ("101.9", "c123", "e1"),
+    ("88.7", "c201", "e1"),
+    ("98.5", "1234", "d0"),    # Test/Eu fallback
+    ("107.5", "f001", "a0"),
+    ("104.4", "c479", "e1"),
+    ("88.1", "2c08", "a0"),    # KKQA Akutan AK (added in earlier PR)
+    ("106.2", "c460", "e1"),   # Heart UK (canonical worked example)
+]
+
+
+def _seed_candidate_rows():
+    """Yield CandidateDomain rows from the bundled CSV (if present) plus the
+    inline list. Tolerant of malformed csv lines."""
+    rows = []
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, "radiodns", "example_stations.csv"),
+        os.path.join(here, "..", "radiodns", "example_stations.csv"),
+        "/app/radiodns/example_stations.csv",
+        "/radiodns/example_stations.csv",
+    ]
+    for csv_path in candidates:
+        csv_path = os.path.normpath(csv_path)
+        if not os.path.isfile(csv_path):
+            continue
+        try:
+            with open(csv_path, newline="", encoding="utf-8") as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    f = row.get("frequency"); p = row.get("pi"); e = row.get("ecc")
+                    if f and p and e:
+                        rows.append((f, p, e))
+        except Exception:
+            continue
+        break
+    rows.extend(_SEED_CANDIDATES)
+
+    seen = set()
+    for f, p, e in rows:
+        try:
+            freq = parse_freq(f)
+            domain = build_fqdn(freq, p, e)
+        except Exception:
+            continue
+        if domain in seen:
+            continue
+        seen.add(domain)
+        yield CandidateDomain(
+            domain=domain,
+            freq=freq,
+            pi=p.strip().lower(),
+            ecc=e.strip().lower(),
+            gcc=p.strip().lower()[0] + e.strip().lower(),
+            source="seed",
+        )
+
+
+def seed_db_if_empty(db_path: str) -> dict:
+    """Insert seed candidate FQDNs into candidate_domains if the table is
+    empty. Idempotent. Returns a small summary dict."""
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".", exist_ok=True)
+    summary = {"db": db_path, "seeded": 0, "skipped_existing": False}
+    with connect(db_path) as conn:
+        init_schema(conn)
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM candidate_domains"
+        ).fetchone()[0]
+        if existing > 0:
+            summary["skipped_existing"] = True
+            summary["existing_rows"] = existing
+            return summary
+        rows = list(_seed_candidate_rows())
+        if rows:
+            insert_candidates(conn, rows)
+            summary["seeded"] = len(rows)
+            summary["sample"] = [r.domain for r in rows[:5]]
+    return summary
 
 
 def _body_json() -> dict:
@@ -609,6 +696,13 @@ def db_export_stations():
     return send_file(out_path, as_attachment=True,
                      download_name="stations.jsonl",
                      mimetype="application/x-ndjson")
+
+
+@bp.post("/db/seed")
+def db_seed():
+    """Re-run the candidate seed (only adds rows if the table is empty)."""
+    summary = seed_db_if_empty(_cfg_db())
+    return jsonify(summary)
 
 
 @bp.post("/db/reset")
