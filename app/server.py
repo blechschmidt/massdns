@@ -54,13 +54,33 @@ except Exception as _e:
     print("[startup] FAILED to load radiodns blueprint:", file=sys.stderr, flush=True)
     print(RDNS_IMPORT_ERROR, file=sys.stderr, flush=True)
 
+    # Return 200 (not 5xx) so DO App Platform's edge doesn't substitute a
+    # generic 'upstream broken' page. We surface the full traceback in the
+    # response body so the failure is debuggable from the browser even
+    # when runtime logs aren't available.
     @app.get("/rdns/info")
-    def _rdns_disabled():
+    def _rdns_disabled_info():
         return jsonify({
             "service": "radiodns_mapper",
             "status": "disabled",
-            "error": "blueprint failed to import; see stderr",
-        }), 503
+            "reason": "rdns_routes blueprint failed to import",
+            "traceback": RDNS_IMPORT_ERROR,
+            "env": {
+                "RADIODNS_WORK": RADIODNS_WORK,
+                "RADIODNS_DB": RADIODNS_DB,
+                "sys_path": sys.path,
+                "cwd": os.getcwd(),
+                "files_in_cwd": sorted(os.listdir(os.getcwd())),
+            },
+        })
+
+    @app.get("/rdns/<path:_rest>")
+    def _rdns_disabled_catchall(_rest):
+        return jsonify({
+            "service": "radiodns_mapper",
+            "status": "disabled",
+            "reason": "rdns_routes blueprint failed to import; see /rdns/info",
+        })
 
 
 @app.get("/")
