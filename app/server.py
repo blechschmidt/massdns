@@ -2,19 +2,40 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 import tempfile
 
 from flask import Flask, Response, jsonify, render_template, request
+
+# Make the radiodns_mapper package importable when this app is run from /app
+# in the container (where the package lives at /app/radiodns_mapper) or from
+# the repo root in development.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in (_HERE, os.path.dirname(_HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from rdns_routes import bp as rdns_bp  # noqa: E402
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 MASSDNS_BIN = os.environ.get("MASSDNS_BIN", "/massdns/bin/massdns")
 RESOLVERS = os.environ.get("RESOLVERS", "/massdns/lists/resolvers.txt")
 MAX_DOMAINS = int(os.environ.get("MAX_DOMAINS", "10000"))
+RADIODNS_WORK = os.environ.get("RADIODNS_WORK", "/data/radiodns")
+RADIODNS_DB = os.environ.get("RADIODNS_DB", os.path.join(RADIODNS_WORK, "radiodns.sqlite"))
 ALLOWED_TYPES = {
     "A", "AAAA", "ANY", "CNAME", "DNSKEY", "DS", "MX", "NS",
     "NSEC", "PTR", "RRSIG", "SOA", "TXT", "CAA", "TLSA", "SRV",
 }
+
+app.config.update(
+    MASSDNS_BIN=MASSDNS_BIN,
+    RESOLVERS=RESOLVERS,
+    RADIODNS_WORK=RADIODNS_WORK,
+    RADIODNS_DB=RADIODNS_DB,
+)
+app.register_blueprint(rdns_bp)
 
 
 @app.get("/")
@@ -43,6 +64,7 @@ def _api_info():
             "GET /api": "this info",
             "GET /healthz": "liveness",
             "POST /resolve": "resolve domains, streams ndjson",
+            "GET /rdns/info": "radiodns_mapper pipeline endpoints",
         },
         "usage": {
             "content_types": ["application/json", "text/plain"],

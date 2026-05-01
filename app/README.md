@@ -6,9 +6,36 @@ streams ndjson resolution results back to the client.
 
 ## Endpoints
 
-- `GET /` — usage information.
+- `GET /` — web UI (Resolver + RadioDNS Pipeline + Database tabs).
 - `GET /healthz` — liveness probe (verifies the binary and resolvers file exist).
 - `POST /resolve` — resolve domains. Streams `application/x-ndjson` as massdns produces output.
+
+### RadioDNS pipeline
+
+All pipeline subcommands from `radiodns_mapper/cli.py` are exposed as HTTP
+endpoints under `/rdns`. They share a single server-side SQLite DB at
+`$RADIODNS_DB` (default `/data/radiodns/radiodns.sqlite`). See the
+**RadioDNS Pipeline** tab in the web UI for an interactive driver.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET  | `/rdns/info` | endpoint reference + active paths |
+| POST | `/rdns/generate` | generate FM bearer FQDN candidates (streams ndjson) |
+| POST | `/rdns/scan-cname` | massdns CNAME sweep (streams ndjson) |
+| POST | `/rdns/extract-broadcasters` | unique broadcaster FQDNs from `cname_hits` |
+| POST | `/rdns/generate-srv` | build `_radioepg/_radiovis` lookup names |
+| POST | `/rdns/scan-srv` | massdns SRV sweep (streams ndjson) |
+| POST | `/rdns/fetch-si` | fetch `SI.xml` from radioepg targets (streams ndjson) |
+| POST | `/rdns/parse-si` | parse stored SI.xml files into `stations` |
+| POST | `/rdns/expand-hits` | PI/freq sweep around confirmed hits |
+| GET  | `/rdns/db/summary` | row counts per table |
+| GET  | `/rdns/db/<table>?limit=&offset=` | paginated table dump (json) |
+| GET  | `/rdns/db/download` | download the live SQLite database |
+| GET  | `/rdns/db/export-stations` | download `stations.jsonl` |
+| POST | `/rdns/db/reset` | delete and re-initialise the DB |
+
+Streaming endpoints emit one JSON object per line (`application/x-ndjson`)
+with an `event` discriminator: `log`, `progress`, `item`, `done`, `error`.
 
 ### POST /resolve
 
@@ -39,7 +66,9 @@ stays open until massdns finishes; `-N` (curl no-buffer) is recommended.
 | `PORT` | `8080` | HTTP listen port |
 | `MASSDNS_BIN` | `/massdns/bin/massdns` | Path to the massdns binary |
 | `RESOLVERS` | `/massdns/lists/resolvers.txt` | Resolvers file |
-| `MAX_DOMAINS` | `10000` | Reject requests larger than this |
+| `MAX_DOMAINS` | `10000` | Reject `/resolve` requests larger than this |
+| `RADIODNS_WORK` | `/data/radiodns` | Workspace dir (SI.xml cache + tmp) |
+| `RADIODNS_DB` | `$RADIODNS_WORK/radiodns.sqlite` | Pipeline state database |
 
 ## Local development
 
