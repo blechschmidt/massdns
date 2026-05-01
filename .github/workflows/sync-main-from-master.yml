@@ -1,0 +1,30 @@
+name: sync-main-from-master
+
+# Mirrors master -> main after every push to master so the DigitalOcean
+# App Platform deploy (which watches `branch: main` with deploy_on_push:
+# true in .do/app.yaml) fires automatically. The repo's default branch
+# is master, but the running app tracks main; this workflow keeps them
+# aligned without any manual `git push origin master:main` step.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-main-from-master
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Fast-forward main to master
+        run: git push origin HEAD:refs/heads/main
