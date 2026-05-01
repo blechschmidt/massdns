@@ -14,7 +14,7 @@ ENV PATH="/venv/bin:${PATH}"
 COPY app/requirements.txt /tmp/requirements.txt
 RUN /venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 
-RUN mkdir -p /massdns/bin /massdns/lists /data/radiodns/si_xml
+RUN mkdir -p /massdns/bin /massdns/lists /tmp/radiodns/si_xml
 COPY --from=build /src/bin/massdns /massdns/bin/massdns
 COPY lists/resolvers.txt /massdns/lists/resolvers.txt
 COPY app/server.py /app/server.py
@@ -27,11 +27,12 @@ ENV PORT=8080 \
     MASSDNS_BIN=/massdns/bin/massdns \
     RESOLVERS=/massdns/lists/resolvers.txt \
     MAX_DOMAINS=10000 \
-    RADIODNS_WORK=/data/radiodns \
-    RADIODNS_DB=/data/radiodns/radiodns.sqlite
+    RADIODNS_WORK=/tmp/radiodns \
+    RADIODNS_DB=/tmp/radiodns/radiodns.sqlite \
+    PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
 WORKDIR /app
 
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 0 --access-logfile - server:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 4 --timeout 0 --preload --access-logfile - --error-logfile - --log-level info server:app"]

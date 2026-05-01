@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import traceback
 
 from flask import Flask, Response, jsonify, render_template, request
 
@@ -15,14 +16,12 @@ for _p in (_HERE, os.path.dirname(_HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from rdns_routes import bp as rdns_bp  # noqa: E402
-
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 MASSDNS_BIN = os.environ.get("MASSDNS_BIN", "/massdns/bin/massdns")
 RESOLVERS = os.environ.get("RESOLVERS", "/massdns/lists/resolvers.txt")
 MAX_DOMAINS = int(os.environ.get("MAX_DOMAINS", "10000"))
-RADIODNS_WORK = os.environ.get("RADIODNS_WORK", "/data/radiodns")
+RADIODNS_WORK = os.environ.get("RADIODNS_WORK", "/tmp/radiodns")
 RADIODNS_DB = os.environ.get("RADIODNS_DB", os.path.join(RADIODNS_WORK, "radiodns.sqlite"))
 ALLOWED_TYPES = {
     "A", "AAAA", "ANY", "CNAME", "DNSKEY", "DS", "MX", "NS",
@@ -35,7 +34,33 @@ app.config.update(
     RADIODNS_WORK=RADIODNS_WORK,
     RADIODNS_DB=RADIODNS_DB,
 )
-app.register_blueprint(rdns_bp)
+
+# Register the radiodns pipeline blueprint, but never let an import error in
+# that subsystem prevent the basic resolver UI from booting. The traceback is
+# sent to stderr so DigitalOcean / gunicorn captures it.
+RDNS_IMPORT_ERROR = None
+try:
+    try:
+        os.makedirs(RADIODNS_WORK, exist_ok=True)
+    except OSError as _e:
+        print(f"[startup] WARNING: cannot create RADIODNS_WORK={RADIODNS_WORK}: {_e}",
+              file=sys.stderr, flush=True)
+    from rdns_routes import bp as rdns_bp  # noqa: E402
+    app.register_blueprint(rdns_bp)
+    print(f"[startup] radiodns blueprint registered (db={RADIODNS_DB})",
+          file=sys.stderr, flush=True)
+except Exception as _e:
+    RDNS_IMPORT_ERROR = "".join(traceback.format_exception(type(_e), _e, _e.__traceback__))
+    print("[startup] FAILED to load radiodns blueprint:", file=sys.stderr, flush=True)
+    print(RDNS_IMPORT_ERROR, file=sys.stderr, flush=True)
+
+    @app.get("/rdns/info")
+    def _rdns_disabled():
+        return jsonify({
+            "service": "radiodns_mapper",
+            "status": "disabled",
+            "error": "blueprint failed to import; see stderr",
+        }), 503
 
 
 @app.get("/")
