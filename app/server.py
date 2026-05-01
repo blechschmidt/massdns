@@ -93,6 +93,61 @@ except Exception as _e:
         })
 
 
+@app.get("/__diag")
+def diag():
+    """Top-level diagnostic — probes each radiodns_mapper import individually
+    and reports the result. Always available regardless of blueprint state."""
+    probes = [
+        "radiodns_mapper",
+        "radiodns_mapper.utils",
+        "radiodns_mapper.models",
+        "radiodns_mapper.generator",
+        "radiodns_mapper.storage",
+        "radiodns_mapper.parsers",
+        "radiodns_mapper.massdns_runner",
+        "radiodns_mapper.si_fetcher",
+        "rdns_routes",
+        "requests",
+        "flask",
+        "sqlite3",
+    ]
+    results = []
+    for name in probes:
+        entry = {"module": name}
+        try:
+            __import__(name)
+            entry["ok"] = True
+        except Exception as ex:
+            entry["ok"] = False
+            entry["error"] = f"{type(ex).__name__}: {ex}"
+            entry["traceback"] = "".join(
+                traceback.format_exception(type(ex), ex, ex.__traceback__)
+            )
+        results.append(entry)
+
+    fs = {}
+    for p in ("/app", "/app/radiodns_mapper", "/app/radiodns",
+              RADIODNS_WORK, "/data", "/tmp"):
+        try:
+            fs[p] = sorted(os.listdir(p))
+        except Exception as ex:
+            fs[p] = f"<{type(ex).__name__}: {ex}>"
+
+    return jsonify({
+        "python_version": sys.version,
+        "platform": sys.platform,
+        "cwd": os.getcwd(),
+        "sys_path": sys.path,
+        "rdns_import_error": RDNS_IMPORT_ERROR,
+        "imports": results,
+        "filesystem": fs,
+        "env": {k: os.environ.get(k) for k in (
+            "PORT", "MASSDNS_BIN", "RESOLVERS", "RADIODNS_WORK",
+            "RADIODNS_DB", "MAX_DOMAINS", "PATH", "PYTHONPATH",
+        )},
+    })
+
+
 @app.get("/")
 def index():
     accept = (request.headers.get("Accept") or "").lower()
