@@ -22,7 +22,12 @@ MASSDNS_BIN = os.environ.get("MASSDNS_BIN", "/massdns/bin/massdns")
 RESOLVERS = os.environ.get("RESOLVERS", "/massdns/lists/resolvers.txt")
 MAX_DOMAINS = int(os.environ.get("MAX_DOMAINS", "10000"))
 RADIODNS_WORK = os.environ.get("RADIODNS_WORK", "/tmp/radiodns")
-RADIODNS_DB = os.environ.get("RADIODNS_DB", os.path.join(RADIODNS_WORK, "radiodns.sqlite"))
+# DATABASE_URL takes precedence over RADIODNS_DB so the DO-injected
+# managed-MySQL DSN works automatically. Falls back to a local SQLite
+# file at RADIODNS_DB (default /tmp/radiodns/radiodns.sqlite).
+RADIODNS_DB = os.environ.get("DATABASE_URL") \
+    or os.environ.get("RADIODNS_DB") \
+    or os.path.join(RADIODNS_WORK, "radiodns.sqlite")
 ALLOWED_TYPES = {
     "A", "AAAA", "ANY", "CNAME", "DNSKEY", "DS", "MX", "NS",
     "NSEC", "PTR", "RRSIG", "SOA", "TXT", "CAA", "TLSA", "SRV",

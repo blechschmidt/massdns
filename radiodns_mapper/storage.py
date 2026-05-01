@@ -1,10 +1,11 @@
-"""SQLite storage layer with idempotent inserts."""
+"""SQLite/MySQL storage layer with idempotent inserts."""
 from __future__ import annotations
 
 import contextlib
 import sqlite3
 from typing import Iterable, Iterator, Optional
 
+from .db_compat import connect as _db_connect
 from .models import (
     Bearer,
     CandidateDomain,
@@ -15,78 +16,83 @@ from .models import (
     Station,
 )
 
+# Schema is written in sqlite3 dialect; db_compat translates it for MySQL
+# (INSERT OR IGNORE -> INSERT IGNORE, AUTOINCREMENT -> AUTO_INCREMENT,
+# datetime('now') -> CURRENT_TIMESTAMP, etc). All columns that participate
+# in PRIMARY KEY or UNIQUE constraints use VARCHAR(N) so MySQL accepts
+# them as keys; SQLite treats VARCHAR as TEXT.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS candidate_domains (
-    domain     TEXT PRIMARY KEY,
+    domain     VARCHAR(255) PRIMARY KEY,
     freq       INTEGER,
-    pi         TEXT,
-    ecc        TEXT,
-    gcc        TEXT,
-    source     TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    pi         VARCHAR(8),
+    ecc        VARCHAR(4),
+    gcc        VARCHAR(8),
+    source     VARCHAR(32),
+    created_at VARCHAR(32) DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS cname_hits (
-    queried_domain   TEXT PRIMARY KEY,
-    broadcaster_fqdn TEXT NOT NULL,
-    resolver         TEXT,
+    queried_domain   VARCHAR(255) PRIMARY KEY,
+    broadcaster_fqdn VARCHAR(255) NOT NULL,
+    resolver         VARCHAR(64),
     raw_json         TEXT,
-    created_at       TEXT DEFAULT (datetime('now'))
+    created_at       VARCHAR(32) DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cname_hits_broadcaster
     ON cname_hits (broadcaster_fqdn);
 
 CREATE TABLE IF NOT EXISTS srv_records (
-    service_domain TEXT NOT NULL,
-    service_type   TEXT NOT NULL,
+    service_domain VARCHAR(255) NOT NULL,
+    service_type   VARCHAR(64) NOT NULL,
     priority       INTEGER,
     weight         INTEGER,
-    port           INTEGER,
-    target         TEXT NOT NULL,
+    port           INTEGER NOT NULL,
+    target         VARCHAR(255) NOT NULL,
     raw_json       TEXT,
-    created_at     TEXT DEFAULT (datetime('now')),
+    created_at     VARCHAR(32) DEFAULT (datetime('now')),
     PRIMARY KEY (service_domain, target, port)
 );
 CREATE INDEX IF NOT EXISTS idx_srv_target ON srv_records (target);
 CREATE INDEX IF NOT EXISTS idx_srv_type   ON srv_records (service_type);
 
 CREATE TABLE IF NOT EXISTS si_documents (
-    target      TEXT PRIMARY KEY,
-    url         TEXT,
+    target      VARCHAR(255) PRIMARY KEY,
+    url         VARCHAR(512),
     status_code INTEGER,
-    filepath    TEXT,
-    sha256      TEXT,
-    fetched_at  TEXT DEFAULT (datetime('now'))
+    filepath    VARCHAR(512),
+    sha256      VARCHAR(64),
+    fetched_at  VARCHAR(32) DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS stations (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_target      TEXT NOT NULL,
-    short_name         TEXT,
-    medium_name        TEXT,
-    long_name          TEXT,
-    radiodns_fqdn      TEXT,
-    service_identifier TEXT,
+    source_target      VARCHAR(255) NOT NULL,
+    short_name         VARCHAR(128),
+    medium_name        VARCHAR(128),
+    long_name          VARCHAR(255),
+    radiodns_fqdn      VARCHAR(255),
+    service_identifier VARCHAR(128),
     raw_xml_fragment   TEXT,
     UNIQUE (source_target, service_identifier, radiodns_fqdn)
 );
 CREATE INDEX IF NOT EXISTS idx_stations_target ON stations (source_target);
 
 CREATE TABLE IF NOT EXISTS bearers (
-    station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
-    bearer_id  TEXT NOT NULL,
+    station_id INTEGER NOT NULL,
+    bearer_id  VARCHAR(255) NOT NULL,
     cost       INTEGER,
-    mime       TEXT,
-    offset     INTEGER,
+    mime       VARCHAR(64),
+    `offset`   INTEGER,
     UNIQUE (station_id, bearer_id)
 );
 
 CREATE TABLE IF NOT EXISTS media (
-    station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
-    url        TEXT NOT NULL,
+    station_id INTEGER NOT NULL,
+    url        VARCHAR(512) NOT NULL,
     width      INTEGER,
     height     INTEGER,
-    mime_value TEXT,
+    mime_value VARCHAR(64),
     UNIQUE (station_id, url, width, height)
 );
 """
@@ -94,18 +100,10 @@ CREATE TABLE IF NOT EXISTS media (
 
 @contextlib.contextmanager
 def connect(path: str) -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    try:
+    """Open a connection. Accepts a sqlite path or a mysql:// URL.
+    Returns a sqlite3-compatible Connection-like object."""
+    with _db_connect(path) as conn:
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
@@ -222,7 +220,7 @@ def insert_station(conn: sqlite3.Connection, st: Station) -> Optional[int]:
 
     for b in st.bearers:
         conn.execute(
-            "INSERT OR IGNORE INTO bearers (station_id, bearer_id, cost, mime, offset) "
+            "INSERT OR IGNORE INTO bearers (station_id, bearer_id, cost, mime, `offset`) "
             "VALUES (?, ?, ?, ?, ?)",
             (sid, b.bearer_id, b.cost, b.mime, b.offset),
         )
@@ -242,7 +240,7 @@ def export_stations_jsonl(conn: sqlite3.Connection, output_path: str) -> int:
         for row in conn.execute("SELECT * FROM stations ORDER BY id"):
             sid = row["id"]
             bearers = [dict(b) for b in conn.execute(
-                "SELECT bearer_id, cost, mime, offset FROM bearers WHERE station_id=?",
+                "SELECT bearer_id, cost, mime, `offset` FROM bearers WHERE station_id=?",
                 (sid,),
             )]
             media = [dict(m) for m in conn.execute(
