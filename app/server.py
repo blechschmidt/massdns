@@ -178,7 +178,9 @@ def _api_info():
             "GET /": "web UI",
             "GET /api": "this info",
             "GET /healthz": "liveness",
+            "GET /health": "liveness (Genoa identity-sidecar alias)",
             "POST /resolve": "resolve domains, streams ndjson",
+            "POST /v1/identity/resolve": "Genoa identity-resolve adapter (stub)",
             "GET /rdns/info": "radiodns_mapper pipeline endpoints",
         },
         "usage": {
@@ -198,6 +200,59 @@ def healthz():
     if not os.path.exists(RESOLVERS):
         return jsonify({"status": "down", "reason": "resolvers file missing"}), 503
     return jsonify({"status": "ok"})
+
+
+# Genoa-compatible aliases.  Genoa's identity client probes GET /health
+# (not /healthz) and POSTs to /v1/identity/resolve.  Both are thin
+# adapters over the existing radiodns_mapper pipeline so massdns can
+# serve double-duty as the Identity sidecar without forking.
+@app.get("/health")
+def health():
+    return healthz()
+
+
+@app.post("/v1/identity/resolve")
+def v1_identity_resolve():
+    """Genoa identity-resolve adapter.
+
+    Body: { call, facility_id, frequency, frequency_unit, gcc, pi }
+    Returns: { available, sources: [...], confirmations: [...] }
+
+    Currently a stub that returns "no confirmations yet" so the Genoa
+    engine surfaces RADIODNS_VALIDATION_UNAVAILABLE cleanly instead of
+    erroring on a 404.  The real RadioDNS resolve will be wired into
+    the existing /rdns/scan-cname + /rdns/scan-srv pipeline in a
+    follow-up — those routes already do the lookup; we just need to
+    project their output into Genoa's { available, sources, confirmations }
+    shape.
+    """
+    payload = request.get_json(silent=True) or {}
+    return jsonify({
+        "available": False,
+        "sources": [
+            {
+                "kind": "radiodns-cname",
+                "status": "unavailable",
+                "reason": "v1/identity/resolve adapter is a stub; the real "
+                          "lookup wraps /rdns/scan-cname + /rdns/scan-srv and "
+                          "is wired in a follow-up.",
+            }
+        ],
+        "confirmations": [],
+        "echo": {
+            "call": payload.get("call"),
+            "facility_id": payload.get("facility_id"),
+            "frequency": payload.get("frequency"),
+            "frequency_unit": payload.get("frequency_unit"),
+            "gcc": payload.get("gcc"),
+            "pi": payload.get("pi"),
+        },
+        "provenance": {
+            "sidecar": "chelstein/massdns",
+            "module": "app/server.py /v1/identity/resolve",
+            "pipeline": "radiodns_mapper (CNAME + SRV)",
+        },
+    })
 
 
 def _parse_domains():
