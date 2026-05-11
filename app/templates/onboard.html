@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZERO TRUST RADIO · Station Onboarding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Orbitron:wght@500;700;900&family=VT323&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <style>
+    /* ── Onboarding page extras ─────────────────────────────────────────── */
+    .onboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .onboard-grid .field.grow { grid-column: 1 / -1; }
+    .onboard-grid .field {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .fqdn-preview {
+      margin: 10px 0 18px;
+      padding: 12px 16px;
+      background: rgba(1, 205, 254, 0.06);
+      border: 1px solid rgba(1, 205, 254, 0.25);
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 1rem;
+      color: var(--cyan);
+      min-height: 48px;
+      word-break: break-all;
+    }
+    .fqdn-preview .fqdn-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .fqdn-preview .fqdn-value {
+      font-size: 1.05rem;
+    }
+    .fqdn-preview .fqdn-dim { color: rgba(1,205,254,0.4); }
+
+    /* records preview */
+    #records-preview {
+      background: rgba(10,5,30,0.8);
+      border: 1px solid rgba(185,103,255,0.3);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--ink);
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 280px;
+      overflow-y: auto;
+      margin-bottom: 14px;
+    }
+    #records-preview .rec-cname  { color: var(--cyan); }
+    #records-preview .rec-srv    { color: var(--purple); }
+    #records-preview .rec-label  { color: var(--muted); font-size: 0.75rem; }
+
+    /* status/result blocks */
+    .result-block {
+      margin-top: 14px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+    .result-block.ok    { background: rgba(108,255,214,0.08); border: 1px solid rgba(108,255,214,0.3); color: var(--ok); }
+    .result-block.error { background: rgba(255,94,147,0.08); border: 1px solid rgba(255,94,147,0.3);  color: var(--err); }
+    .result-block.info  { background: rgba(1,205,254,0.06);  border: 1px solid rgba(1,205,254,0.2);   color: var(--cyan); }
+    .result-block pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
+
+    /* stations table */
+    .stations-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.78rem; }
+    .stations-tbl th {
+      text-align: left; padding: 6px 10px; border-bottom: 2px solid rgba(185,103,255,0.35);
+      color: var(--cyan); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--display);
+      font-size: 0.65rem; background: rgba(12,0,50,0.8); position: sticky; top: 0;
+    }
+    .stations-tbl td { padding: 7px 10px; border-bottom: 1px solid rgba(185,103,255,0.12); vertical-align: top; }
+    .stations-tbl tr:hover td { background: rgba(255,42,252,0.06); }
+    .stations-tbl .callsign { color: var(--pink); font-weight: bold; font-family: var(--display); font-size: 0.72rem; }
+    .stations-tbl .fqdn-cell { color: var(--cyan); word-break: break-all; max-width: 280px; }
+    .stations-tbl .badge {
+      display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 0.7rem;
+      font-family: var(--display); letter-spacing: 0.06em;
+    }
+    .stations-tbl .badge.applied { background: rgba(108,255,214,0.15); color: var(--ok); border: 1px solid rgba(108,255,214,0.3); }
+    .stations-tbl .badge.pending { background: rgba(255,209,102,0.15); color: var(--warn); border: 1px solid rgba(255,209,102,0.3); }
+    .stations-tbl .badge.fm { background: rgba(185,103,255,0.2); color: var(--purple); border: 1px solid rgba(185,103,255,0.4); }
+    .stations-tbl .badge.am { background: rgba(255,140,66,0.2); color: var(--orange); border: 1px solid rgba(255,140,66,0.4); }
+    .stations-tbl .action-btn {
+      font-family: var(--mono); font-size: 0.72rem; padding: 2px 8px; margin-right: 4px;
+      cursor: pointer; border-radius: 4px; border: 1px solid rgba(185,103,255,0.4);
+      background: rgba(185,103,255,0.1); color: var(--muted); transition: all 0.15s;
+    }
+    .stations-tbl .action-btn:hover { background: rgba(185,103,255,0.25); color: var(--ink); }
+
+    /* verify results */
+    .verify-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-family: var(--mono); font-size: 0.78rem; }
+    .verify-row .vr-ok  { color: var(--ok); flex-shrink: 0; }
+    .verify-row .vr-fail{ color: var(--err); flex-shrink: 0; }
+    .verify-row .vr-name{ color: var(--cyan); word-break: break-all; }
+    .verify-row .vr-type{ color: var(--purple); flex-shrink: 0; }
+
+    /* misc */
+    .loading { color: var(--muted); font-family: var(--mono); font-size: 0.82rem; }
+    .empty-state { color: rgba(181,168,255,0.5); font-family: var(--mono); font-size: 0.85rem; padding: 20px; text-align: center; }
+
+    input[type=text], input[type=email], input[type=url], input[type=number], select, textarea {
+      width: 100%;
+    }
+    .band-btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    .band-btn {
+      flex: 1; min-width: 60px; padding: 8px 4px; text-align: center; cursor: pointer;
+      font-family: var(--display); font-size: 0.7rem; letter-spacing: 0.1em;
+      border: 1px solid rgba(185,103,255,0.4); border-radius: 6px;
+      background: rgba(185,103,255,0.06); color: var(--muted); transition: all 0.15s;
+    }
+    .band-btn.active {
+      background: rgba(185,103,255,0.25); color: var(--purple); border-color: var(--purple);
+      box-shadow: 0 0 10px rgba(185,103,255,0.2);
+    }
+    .fm-only { transition: opacity 0.2s; }
+    .fm-only.hidden { opacity: 0.3; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="bg-sky"></div>
+  <div class="bg-stars"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-scanlines"></div>
+
+  <main>
+    <header>
+      <div class="brand">
+        <div class="title">
+          <h1 data-text="ZERO TRUST RADIO">ZERO TRUST RADIO</h1>
+          <p class="tag">◈ RadioDNS Station Registry · {{ pdns_zone }}</p>
+        </div>
+      </div>
+      <p class="subtag"><a href="/">← back to scanner</a> · <a href="/rdns/info">/rdns/info</a> · <a href="/rdns/stations">/rdns/stations</a></p>
+    </header>
+
+    <!-- ══════════ REGISTER STATION ══════════ -->
+    <section class="panel" id="add-station">
+      <h2>◤ REGISTER STATION</h2>
+
+      <div class="onboard-grid">
+
+        <!-- Callsign -->
+        <label class="field">
+          <span class="lbl">◢ CALLSIGN <em>// e.g. WXYZ, NTS1</em></span>
+          <input type="text" id="f-callsign" placeholder="WXYZ" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <!-- Band -->
+        <label class="field">
+          <span class="lbl">◢ BAND</span>
+          <div class="band-btn-group" id="band-btns">
+            <button class="band-btn active" data-band="FM">FM</button>
+            <button class="band-btn" data-band="AM">AM</button>
+            <button class="band-btn" data-band="HD">HD</button>
+            <button class="band-btn" data-band="STREAMING">STREAM</button>
+          </div>
+          <input type="hidden" id="f-band" value="FM" />
+        </label>
+
+        <!-- Frequency -->
+        <label class="field">
+          <span class="lbl">◢ FREQUENCY <em>// e.g. 106.5 or 10650</em></span>
+          <input type="text" id="f-freq" placeholder="106.5" autocomplete="off" />
+        </label>
+
+        <!-- PI Code (FM only) -->
+        <label class="field fm-only" id="row-pi">
+          <span class="lbl">◢ PI CODE <em>// 4 hex chars</em></span>
+          <input type="text" id="f-pi" placeholder="c479" maxlength="6" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <!-- ECC (FM only) -->
+        <label class="field fm-only" id="row-ecc">
+          <span class="lbl">◢ ECC <em>// 2 hex chars, e.g. e1</em></span>
+          <input type="text" id="f-ecc" placeholder="e1" maxlength="4" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <!-- EPG host -->
+        <label class="field">
+          <span class="lbl">◢ RadioEPG HOST</span>
+          <input type="text" id="f-epg" value="{{ epg_default }}" autocomplete="off" />
+        </label>
+
+        <!-- SPI host -->
+        <label class="field">
+          <span class="lbl">◢ RadioSPI HOST</span>
+          <input type="text" id="f-spi" value="{{ spi_default }}" autocomplete="off" />
+        </label>
+
+        <!-- Provider name -->
+        <label class="field">
+          <span class="lbl">◢ PROVIDER NAME <em>// optional</em></span>
+          <input type="text" id="f-provider" placeholder="Zero Trust Radio Ltd" autocomplete="off" />
+        </label>
+
+        <!-- Website -->
+        <label class="field">
+          <span class="lbl">◢ WEBSITE <em>// optional</em></span>
+          <input type="url" id="f-website" placeholder="https://example.com" autocomplete="off" />
+        </label>
+
+        <!-- Contact email -->
+        <label class="field">
+          <span class="lbl">◢ CONTACT EMAIL <em>// optional</em></span>
+          <input type="email" id="f-email" placeholder="ops@example.com" autocomplete="off" />
+        </label>
+
+        <!-- Admin key -->
+        <label class="field">
+          <span class="lbl">◢ ADMIN KEY <em>// if required</em></span>
+          <input type="text" id="f-admin-key" placeholder="leave blank if not set" autocomplete="off" />
+        </label>
+
+      </div>
+
+      <!-- Live FQDN preview -->
+      <div class="fqdn-preview" id="fqdn-preview">
+        <div class="fqdn-label">RadioDNS FQDN preview</div>
+        <div class="fqdn-value" id="fqdn-preview-val"><span style="color:rgba(1,205,254,0.3)">fill in fields above…</span></div>
+      </div>
+
+      <div class="step-actions">
+        <button class="primary" id="btn-generate">◈ PREVIEW RECORDS</button>
+        <button class="primary" id="btn-save" disabled>▶ SAVE STATION</button>
+      </div>
+      <div id="save-status"></div>
+    </section>
+
+    <!-- ══════════ GENERATED RECORDS ══════════ -->
+    <section class="panel" id="generated-records" style="display:none">
+      <h2>◤ GENERATED RADIODNS RECORDS</h2>
+      <pre id="records-preview"></pre>
+      <div class="step-actions">
+        <button class="primary" id="btn-apply">⚡ APPLY TO POWERDNS</button>
+        <button class="ghost" id="btn-verify">✓ VERIFY DNS</button>
+        <button class="ghost" id="btn-zonefile">⤓ ZONEFILE</button>
+        <button class="ghost" id="btn-export">⤓ EXPORT JSON</button>
+      </div>
+      <div id="pdns-status"></div>
+      <div id="verify-results"></div>
+    </section>
+
+    <!-- ══════════ REGISTERED STATIONS ══════════ -->
+    <section class="panel" id="stations-list">
+      <h2>◤ REGISTERED STATIONS</h2>
+      <button class="ghost" id="btn-refresh-stations" style="margin-bottom:12px">↻ refresh</button>
+      <div id="stations-table"><div class="empty-state">loading…</div></div>
+    </section>
+  </main>
+
+  <script>
+    // Inject template variables for JS
+    window._PDNS_ZONE = {{ pdns_zone | tojson }};
+  </script>
+  <script src="/static/stations.js"></script>
+</body>
+</html>

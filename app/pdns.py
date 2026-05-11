@@ -81,6 +81,51 @@ def zone_rrsets() -> list:
     return r.json().get("rrsets", [])
 
 
+def list_zones() -> list:
+    """Return list of all zones from PowerDNS."""
+    url = f"{PDNS_API_URL.rstrip('/')}/servers/{PDNS_SERVER}/zones"
+    r = requests.get(url, headers=_headers(), timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_zone(zone: str = None) -> dict:
+    """Return zone metadata + rrsets."""
+    url = f"{PDNS_API_URL.rstrip('/')}/servers/{PDNS_SERVER}/zones/{_abs(zone or PDNS_ZONE)}"
+    r = requests.get(url, headers=_headers(), timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+def upsert_record(name: str, rtype: str, records: list, ttl: int = None, zone: str = None) -> None:
+    """Generic record upsert. records is a list of content strings."""
+    zone = zone or PDNS_ZONE
+    payload = {"rrsets": [{"name": _abs(name), "type": rtype.upper(), "ttl": ttl or PDNS_TTL,
+        "changetype": "REPLACE", "records": [{"content": c, "disabled": False} for c in records]}]}
+    url = f"{PDNS_API_URL.rstrip('/')}/servers/{PDNS_SERVER}/zones/{_abs(zone)}"
+    r = requests.patch(url, json=payload, headers=_headers(), timeout=10)
+    r.raise_for_status()
+
+
+def rectify_zone(zone: str = None) -> None:
+    """Trigger zone rectification (for DNSSEC zones)."""
+    url = f"{PDNS_API_URL.rstrip('/')}/servers/{PDNS_SERVER}/zones/{_abs(zone or PDNS_ZONE)}/rectify"
+    r = requests.put(url, headers=_headers(), timeout=10)
+    r.raise_for_status()
+
+
+def verify_record(name: str, rtype: str) -> dict:
+    """DNS lookup to verify a record exists. Uses system resolver."""
+    import socket
+    try:
+        if rtype.upper() == "CNAME":
+            socket.getaddrinfo(name.rstrip("."), None)
+            return {"ok": True, "name": name, "type": rtype}
+        return {"ok": None, "name": name, "type": rtype, "note": "live verify not implemented for " + rtype}
+    except socket.gaierror as e:
+        return {"ok": False, "name": name, "type": rtype, "error": str(e)}
+
+
 def pdns_status() -> dict:
     try:
         r = requests.get(_zone_url(), headers=_headers(), timeout=5)
