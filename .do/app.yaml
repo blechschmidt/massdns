@@ -22,3 +22,21 @@ services:
       - key: MAX_DOMAINS
         value: "10000"
         scope: RUN_TIME
+      - key: PDNS_API_URL
+        value: "http://147.182.190.208:8081/api/v1"
+        scope: RUN_TIME
+      - key: PDNS_ZONE
+        value: "radiodns.zerotrustradio.org"
+        scope: RUN_TIME
+      - key: PDNS_SERVER
+        value: "localhost"
+        scope: RUN_TIME
+      - key: PDNS_TTL
+        value: "300"
+        scope: RUN_TIME
+      - key: PDNS_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADMIN_KEY
+        scope: RUN_TIME
+        type: SECRET

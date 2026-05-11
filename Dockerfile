@@ -19,6 +19,8 @@ COPY --from=build /src/bin/massdns /massdns/bin/massdns
 COPY lists/resolvers.txt /massdns/lists/resolvers.txt
 COPY app/server.py /app/server.py
 COPY app/rdns_routes.py /app/rdns_routes.py
+COPY app/service_routes.py /app/service_routes.py
+COPY app/pdns.py /app/pdns.py
 COPY app/templates /app/templates
 COPY app/static /app/static
 COPY radiodns_mapper /app/radiodns_mapper
