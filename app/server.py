@@ -301,6 +301,12 @@ def list_routes():
 # ---------------------------------------------------------------------------
 # /service/* aliases — work regardless of Node.js radio-service component
 # ---------------------------------------------------------------------------
+@app.get("/service")
+@app.get("/service/")
+def service_root():
+    return redirect("/rdns/info")
+
+
 @app.get("/service/info")
 def service_info():
     return redirect("/rdns/info")
