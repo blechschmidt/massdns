@@ -206,15 +206,10 @@ def _api_info():
             "GET /api": "this info",
             "GET /health": "liveness (alias)",
             "GET /healthz": "liveness",
-            "GET /routes": "list all registered routes",
+            "GET /health": "liveness (Genoa identity-sidecar alias)",
             "POST /resolve": "resolve domains, streams ndjson",
-            "GET /rdns/info": "radiodns_mapper pipeline info",
-            "GET /rdns/db/summary": "pipeline DB row counts",
-            "GET /rdns/db/candidate_domains": "list candidate domains",
-            "GET /service/info": "alias → /rdns/info",
-            "GET /service/stations": "alias → /rdns/db/candidate_domains",
-            "GET /service/status": "alias → /rdns/db/summary",
-            "POST /service/register": "RadioDNS station registration",
+            "POST /v1/identity/resolve": "Genoa identity-resolve adapter (stub)",
+            "GET /rdns/info": "radiodns_mapper pipeline endpoints",
         },
         "usage": {
             "content_types": ["application/json", "text/plain"],
@@ -236,59 +231,57 @@ def healthz():
     return jsonify({"status": "ok"})
 
 
-# ---------------------------------------------------------------------------
-# /routes — debug endpoint listing every registered route
-# ---------------------------------------------------------------------------
-@app.get("/routes")
-def list_routes():
-    routes = []
-    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
-        routes.append({
-            "path": rule.rule,
-            "methods": sorted(m for m in rule.methods if m not in ("HEAD", "OPTIONS")),
-            "endpoint": rule.endpoint,
-        })
-    return jsonify(routes)
+# Genoa-compatible aliases.  Genoa's identity client probes GET /health
+# (not /healthz) and POSTs to /v1/identity/resolve.  Both are thin
+# adapters over the existing radiodns_mapper pipeline so massdns can
+# serve double-duty as the Identity sidecar without forking.
+@app.get("/health")
+def health():
+    return healthz()
 
 
-# ---------------------------------------------------------------------------
-# /service/* aliases — all requests served by this (Python) app so they work
-# regardless of whether the Node.js radio-service component is deployed.
-# ---------------------------------------------------------------------------
-@app.get("/service/info")
-def service_info():
-    return redirect(url_for("rdns.info"))
+@app.post("/v1/identity/resolve")
+def v1_identity_resolve():
+    """Genoa identity-resolve adapter.
 
+    Body: { call, facility_id, frequency, frequency_unit, gcc, pi }
+    Returns: { available, sources: [...], confirmations: [...] }
 
-@app.get("/service/stations")
-def service_stations():
-    limit = request.args.get("limit", "200")
-    return redirect(f"/rdns/db/candidate_domains?limit={limit}")
-
-
-@app.get("/service/status")
-def service_status():
-    return redirect(url_for("rdns.db_summary"))
-
-
-@app.post("/service/register")
-def service_register():
-    """Station registration. Delegates to rdns blueprint if available."""
-    try:
-        from app.pdns import pdns_status  # noqa: F401
-        # Full registration not yet wired into the Python layer;
-        # return 501 with a clear message rather than 404.
-    except Exception:
-        pass
+    Currently a stub that returns "no confirmations yet" so the Genoa
+    engine surfaces RADIODNS_VALIDATION_UNAVAILABLE cleanly instead of
+    erroring on a 404.  The real RadioDNS resolve will be wired into
+    the existing /rdns/scan-cname + /rdns/scan-srv pipeline in a
+    follow-up — those routes already do the lookup; we just need to
+    project their output into Genoa's { available, sources, confirmations }
+    shape.
+    """
+    payload = request.get_json(silent=True) or {}
     return jsonify({
-        "error": "not_implemented",
-        "message": "Station registration requires the radio-service component. "
-                   "Use POST /rdns/generate to seed candidate domains instead.",
-        "alternatives": {
-            "seed_pipeline": "POST /rdns/generate",
-            "info": "GET /rdns/info",
+        "available": False,
+        "sources": [
+            {
+                "kind": "radiodns-cname",
+                "status": "unavailable",
+                "reason": "v1/identity/resolve adapter is a stub; the real "
+                          "lookup wraps /rdns/scan-cname + /rdns/scan-srv and "
+                          "is wired in a follow-up.",
+            }
+        ],
+        "confirmations": [],
+        "echo": {
+            "call": payload.get("call"),
+            "facility_id": payload.get("facility_id"),
+            "frequency": payload.get("frequency"),
+            "frequency_unit": payload.get("frequency_unit"),
+            "gcc": payload.get("gcc"),
+            "pi": payload.get("pi"),
         },
-    }), 501
+        "provenance": {
+            "sidecar": "chelstein/massdns",
+            "module": "app/server.py /v1/identity/resolve",
+            "pipeline": "radiodns_mapper (CNAME + SRV)",
+        },
+    })
 
 
 def _parse_domains():
