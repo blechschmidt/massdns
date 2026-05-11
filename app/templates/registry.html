@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZERO TRUST RADIO · Broadcast Identity Registry</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Orbitron:wght@500;700;900&family=VT323&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <style>
+    /* ── Registry page extras ──────────────────────────────────────────── */
+    .reg-tabs {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      margin-bottom: 24px; border-bottom: 1px solid rgba(185,103,255,0.25); padding-bottom: 8px;
+    }
+    .reg-tab {
+      padding: 7px 16px; font-family: var(--display); font-size: 0.68rem;
+      letter-spacing: 0.1em; border-radius: 6px 6px 0 0; cursor: pointer;
+      border: 1px solid rgba(185,103,255,0.3); border-bottom: none;
+      background: rgba(185,103,255,0.05); color: var(--muted); transition: all 0.15s;
+    }
+    .reg-tab.active {
+      background: rgba(185,103,255,0.2); color: var(--purple);
+      border-color: var(--purple);
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* stats bar */
+    .stats-bar {
+      display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;
+    }
+    .stat-chip {
+      padding: 6px 14px; border-radius: 20px; font-family: var(--mono); font-size: 0.75rem;
+      background: rgba(1,205,254,0.07); border: 1px solid rgba(1,205,254,0.2); color: var(--cyan);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .stat-chip .stat-val { font-weight: bold; color: var(--ink); }
+
+    /* claim status badges */
+    .badge-unclaimed       { background:rgba(181,168,255,0.12); color:rgba(181,168,255,0.7); border:1px solid rgba(181,168,255,0.25); }
+    .badge-claim_requested { background:rgba(255,209,102,0.12); color:var(--warn); border:1px solid rgba(255,209,102,0.3); }
+    .badge-verified        { background:rgba(1,205,254,0.12);   color:var(--cyan); border:1px solid rgba(1,205,254,0.3); }
+    .badge-active          { background:rgba(108,255,214,0.12); color:var(--ok);   border:1px solid rgba(108,255,214,0.3); }
+    .badge-suspended       { background:rgba(255,94,147,0.12);  color:var(--err);  border:1px solid rgba(255,94,147,0.3); }
+    .claim-badge {
+      display:inline-block; padding:2px 8px; border-radius:4px;
+      font-family:var(--display); font-size:0.65rem; letter-spacing:0.06em;
+    }
+
+    /* identity cards */
+    .identity-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 12px; margin-top: 12px;
+    }
+    .identity-card {
+      padding: 14px 16px; border-radius: 8px;
+      background: rgba(1,205,254,0.03); border: 1px solid rgba(1,205,254,0.12);
+      transition: border-color 0.15s, background 0.15s;
+      cursor: pointer;
+    }
+    .identity-card:hover { border-color: rgba(1,205,254,0.3); background: rgba(1,205,254,0.07); }
+    .identity-card.active-card   { border-color: rgba(108,255,214,0.4); }
+    .identity-card.claimed-card  { border-color: rgba(255,209,102,0.35); }
+    .ic-callsign { font-family:var(--display); font-size:0.9rem; color:var(--pink); font-weight:bold; }
+    .ic-freq     { font-family:var(--mono); font-size:0.8rem; color:var(--cyan); margin-top:2px; }
+    .ic-meta     { font-family:var(--mono); font-size:0.72rem; color:var(--muted); margin-top:4px; }
+    .ic-fqdn     { font-family:var(--mono); font-size:0.65rem; color:rgba(1,205,254,0.4); margin-top:6px; word-break:break-all; }
+    .ic-actions  { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+    .ic-btn {
+      font-family:var(--mono); font-size:0.7rem; padding:3px 10px;
+      border-radius:4px; border:1px solid rgba(185,103,255,0.4);
+      background:rgba(185,103,255,0.08); color:var(--muted); cursor:pointer; transition:all 0.15s;
+    }
+    .ic-btn:hover { background:rgba(185,103,255,0.2); color:var(--ink); }
+    .ic-btn.primary { border-color:rgba(108,255,214,0.4); background:rgba(108,255,214,0.1); color:var(--ok); }
+    .ic-btn.primary:hover { background:rgba(108,255,214,0.2); }
+
+    /* search / filter bar */
+    .search-bar {
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px;
+    }
+    .search-bar input, .search-bar select {
+      font-family: var(--mono); font-size: 0.82rem;
+      background: rgba(10,5,30,0.8); border: 1px solid rgba(185,103,255,0.3);
+      color: var(--ink); border-radius: 6px; padding: 7px 12px;
+    }
+    .search-bar input { flex: 1; min-width: 180px; }
+
+    /* claim form */
+    .claim-form-wrap { max-width: 560px; }
+    .claim-form-wrap .field { display:flex; flex-direction:column; gap:5px; margin-bottom:12px; }
+    .claim-form-wrap label { font-family:var(--display); font-size:0.65rem; color:var(--muted); letter-spacing:0.08em; }
+    .claim-form-wrap input, .claim-form-wrap textarea, .claim-form-wrap select {
+      font-family:var(--mono); font-size:0.82rem;
+      background:rgba(10,5,30,0.8); border:1px solid rgba(185,103,255,0.3);
+      color:var(--ink); border-radius:6px; padding:8px 12px; width:100%;
+    }
+    .claim-form-wrap textarea { min-height: 80px; resize: vertical; }
+
+    /* detail panel */
+    .detail-panel {
+      background: rgba(10,5,30,0.85); border: 1px solid rgba(1,205,254,0.2);
+      border-radius: 10px; padding: 20px 24px; margin-top: 12px;
+    }
+    .dp-section { margin-bottom: 18px; }
+    .dp-section h4 { font-family:var(--display); font-size:0.7rem; color:var(--muted);
+      letter-spacing:0.1em; margin:0 0 8px; text-transform:uppercase; }
+    .dp-row { display:flex; gap:8px; font-family:var(--mono); font-size:0.78rem; margin-bottom:4px; }
+    .dp-key { color:var(--muted); min-width:130px; flex-shrink:0; }
+    .dp-val { color:var(--cyan); word-break:break-all; }
+
+    /* result / status blocks */
+    .result-block {
+      margin: 12px 0; padding: 12px 16px; border-radius: 8px;
+      font-family:var(--mono); font-size:0.82rem; line-height:1.6;
+    }
+    .result-block.ok    { background:rgba(108,255,214,0.08); border:1px solid rgba(108,255,214,0.3); color:var(--ok); }
+    .result-block.error { background:rgba(255,94,147,0.08);  border:1px solid rgba(255,94,147,0.3);  color:var(--err); }
+    .result-block.info  { background:rgba(1,205,254,0.06);   border:1px solid rgba(1,205,254,0.2);   color:var(--cyan); }
+    .result-block.warn  { background:rgba(255,209,102,0.06); border:1px solid rgba(255,209,102,0.3); color:var(--warn); }
+    .loading { color:var(--muted); font-family:var(--mono); font-size:0.82rem; }
+    .empty-state { color:rgba(181,168,255,0.4); font-family:var(--mono); font-size:0.82rem;
+      padding:24px; text-align:center; }
+
+    /* admin claims table */
+    .claims-tbl { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:0.76rem; }
+    .claims-tbl th {
+      text-align:left; padding:6px 10px; border-bottom:2px solid rgba(185,103,255,0.35);
+      color:var(--cyan); text-transform:uppercase; letter-spacing:0.08em;
+      font-family:var(--display); font-size:0.63rem; background:rgba(12,0,50,0.8);
+    }
+    .claims-tbl td { padding:7px 10px; border-bottom:1px solid rgba(185,103,255,0.1); vertical-align:top; }
+    .claims-tbl tr:hover td { background:rgba(255,42,252,0.05); }
+
+    /* ingest section */
+    .ingest-wrap { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; margin-bottom:18px; }
+
+    /* namespace display */
+    .ns-list { font-family:var(--mono); font-size:0.78rem; line-height:2.0; }
+    .ns-list .ns-row { display:flex; gap:8px; align-items:center; }
+    .ns-tag { padding:1px 8px; border-radius:3px; font-size:0.66rem; font-family:var(--display); letter-spacing:0.05em; }
+    .ns-tag.ztr     { background:rgba(185,103,255,0.2); color:var(--purple); border:1px solid rgba(185,103,255,0.35); }
+    .ns-tag.official{ background:rgba(1,205,254,0.12);  color:var(--cyan);   border:1px solid rgba(1,205,254,0.3); }
+    .ns-tag.dormant { background:rgba(181,168,255,0.1); color:rgba(181,168,255,0.5); border:1px solid rgba(181,168,255,0.2); }
+  </style>
+</head>
+<body>
+  <div class="bg-sky"></div>
+  <div class="bg-stars"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-scanlines"></div>
+
+  <main>
+    <header>
+      <div class="brand">
+        <div class="title">
+          <h1 data-text="ZERO TRUST RADIO">ZERO TRUST RADIO</h1>
+          <p class="tag">◈ Broadcast Identity Registry · {{ pdns_zone }}</p>
+        </div>
+      </div>
+      <p class="subtag">
+        <a href="/">← scanner</a> ·
+        <a href="/rdns/onboard">station onboarding</a> ·
+        <a href="/rdns/info">/rdns/info</a>
+      </p>
+    </header>
+
+    <!-- Stats bar -->
+    <div id="stats-bar" class="stats-bar">
+      <div class="stat-chip loading">⋯ loading registry stats…</div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="reg-tabs">
+      <button class="reg-tab active" data-tab="search">◈ Search FCC Stations</button>
+      <button class="reg-tab" data-tab="dormant">◎ Dormant Identities</button>
+      <button class="reg-tab" data-tab="active">⚡ Active Stations</button>
+      <button class="reg-tab" data-tab="conflicts">⚠ Conflicts</button>
+      <button class="reg-tab" data-tab="ingest">⤓ Ingest FCC Data</button>
+      <button class="reg-tab" data-tab="admin">◈ Admin Claims</button>
+    </div>
+
+    <!-- ═══ TAB: Search FCC Stations ═══ -->
+    <div class="tab-pane active" id="tab-search">
+      <section class="panel">
+        <h2>◤ SEARCH FCC STATION DATABASE</h2>
+        <p style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:16px">
+          Search pre-provisioned broadcast identities by callsign, city, or licensee.
+          Click any result to view identity namespaces and claim this station.
+        </p>
+
+        <div class="search-bar">
+          <input type="text" id="search-q" placeholder="KSLX · Scottsdale · Hubbard Radio" />
+          <select id="search-band">
+            <option value="">All bands</option>
+            <option value="FM">FM</option>
+            <option value="AM">AM</option>
+            <option value="LPFM">LPFM</option>
+            <option value="TRANSLATOR">Translator</option>
+          </select>
+          <select id="search-state">
+            <option value="">All states</option>
+            <option>AK</option><option>AL</option><option>AR</option><option>AZ</option>
+            <option>CA</option><option>CO</option><option>CT</option><option>DC</option>
+            <option>DE</option><option>FL</option><option>GA</option><option>HI</option>
+            <option>IA</option><option>ID</option><option>IL</option><option>IN</option>
+            <option>KS</option><option>KY</option><option>LA</option><option>MA</option>
+            <option>MD</option><option>ME</option><option>MI</option><option>MN</option>
+            <option>MO</option><option>MS</option><option>MT</option><option>NC</option>
+            <option>ND</option><option>NE</option><option>NH</option><option>NJ</option>
+            <option>NM</option><option>NV</option><option>NY</option><option>OH</option>
+            <option>OK</option><option>OR</option><option>PA</option><option>RI</option>
+            <option>SC</option><option>SD</option><option>TN</option><option>TX</option>
+            <option>UT</option><option>VA</option><option>VT</option><option>WA</option>
+            <option>WI</option><option>WV</option><option>WY</option>
+          </select>
+          <button class="ghost" id="btn-search">◈ SEARCH</button>
+        </div>
+
+        <div id="search-results">
+          <div class="empty-state">◈ Enter a callsign or city to search FCC stations</div>
+        </div>
+
+        <!-- Detail panel (shown on card click) -->
+        <div id="detail-panel" style="display:none" class="detail-panel">
+          <div id="detail-content"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ═══ TAB: Dormant Identities ═══ -->
+    <div class="tab-pane" id="tab-dormant">
+      <section class="panel">
+        <h2>◤ DORMANT IDENTITIES</h2>
+        <p style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:16px">
+          Pre-provisioned ZTR broadcast identities awaiting station claim.
+          These are <strong>not</strong> official RadioDNS records — they are ZTR extended namespaces
+          held in reserve for each FCC-licensed facility.
+        </p>
+        <div class="search-bar">
+          <select id="dormant-band">
+            <option value="">All bands</option>
+            <option value="FM">FM</option><option value="AM">AM</option>
+            <option value="LPFM">LPFM</option><option value="TRANSLATOR">Translator</option>
+          </select>
+          <select id="dormant-state">
+            <option value="">All states</option>
+            <option>AZ</option><option>CA</option><option>TX</option><option>FL</option>
+            <option>NY</option><option>IL</option><option>PA</option><option>OH</option>
+          </select>
+          <button class="ghost" id="btn-load-dormant">↻ Load Dormant</button>
+        </div>
+        <div id="dormant-results">
+          <div class="empty-state">◈ Click "Load Dormant" to browse unclaimed identities</div>
+        </div>
+        <div id="dormant-pagination" style="margin-top:12px;display:none">
+          <button class="ghost" id="btn-dormant-more">load more…</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ═══ TAB: Active Stations ═══ -->
+    <div class="tab-pane" id="tab-active">
+      <section class="panel">
+        <h2>◤ ACTIVE STATIONS</h2>
+        <div id="active-results">
+          <div class="loading">⋯ loading active stations…</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ═══ TAB: Conflicts ═══ -->
+    <div class="tab-pane" id="tab-conflicts">
+      <section class="panel">
+        <h2>◤ IDENTITY CONFLICTS</h2>
+        <p style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:16px">
+          Identities with multiple pending claims or duplicate active callsigns.
+        </p>
+        <button class="ghost" id="btn-load-conflicts" style="margin-bottom:14px">↻ Check Conflicts</button>
+        <div id="conflicts-results">
+          <div class="empty-state">◈ Click "Check Conflicts" to scan for issues</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ═══ TAB: Ingest FCC Data ═══ -->
+    <div class="tab-pane" id="tab-ingest">
+      <section class="panel">
+        <h2>◤ INGEST FCC FACILITY DATA</h2>
+        <div class="result-block info" style="margin-bottom:18px">
+          ◈ <strong>Architecture note:</strong> ZTR ingests FCC facility records to pre-provision
+          dormant broadcast identities. Official RadioDNS bearers (<code>*.radiodns.org</code>)
+          are only generated when a station provides verified RDS parameters (PI code + ECC).
+          Analog AM stations receive ZTR extended identities only — no fake RadioDNS bearers.
+        </div>
+
+        <div class="ingest-wrap">
+          <div>
+            <h4 style="font-family:var(--display);font-size:0.68rem;color:var(--muted);margin-bottom:8px">
+              ◢ FETCH FROM FCC CDBS
+            </h4>
+            <p style="font-family:var(--mono);font-size:0.75rem;color:var(--muted);margin-bottom:10px">
+              Attempts to fetch <code>facility.zip</code> from FCC CDBS.
+              May be offline — use file upload as fallback.
+            </p>
+            <input type="text" id="f-admin-key-ingest" placeholder="Admin key (if required)"
+              style="font-family:var(--mono);font-size:0.8rem;background:rgba(10,5,30,0.8);
+              border:1px solid rgba(185,103,255,0.3);color:var(--ink);border-radius:6px;padding:7px 12px;
+              width:220px;margin-bottom:8px" />
+            <br>
+            <button class="primary" id="btn-ingest-cdbs">⤓ FETCH FCC CDBS</button>
+          </div>
+          <div>
+            <h4 style="font-family:var(--display);font-size:0.68rem;color:var(--muted);margin-bottom:8px">
+              ◢ UPLOAD FACILITY FILE
+            </h4>
+            <p style="font-family:var(--mono);font-size:0.75rem;color:var(--muted);margin-bottom:10px">
+              Upload FCC <code>facility.dat</code> (CDBS pipe-delimited) or
+              <code>facility.csv</code> (LMS export).
+            </p>
+            <input type="file" id="f-facility-file" accept=".dat,.csv,.txt,.zip"
+              style="font-family:var(--mono);font-size:0.75rem;color:var(--muted);margin-bottom:8px" />
+            <br>
+            <button class="ghost" id="btn-upload-facility">⤓ UPLOAD &amp; INGEST</button>
+          </div>
+          <div>
+            <h4 style="font-family:var(--display);font-size:0.68rem;color:var(--muted);margin-bottom:8px">
+              ◢ RE-PROVISION IDENTITIES
+            </h4>
+            <p style="font-family:var(--mono);font-size:0.75rem;color:var(--muted);margin-bottom:10px">
+              Generate station_identities for any fcc_facilities rows not yet provisioned.
+            </p>
+            <button class="ghost" id="btn-provision">↻ PROVISION IDENTITIES</button>
+          </div>
+        </div>
+
+        <div id="ingest-status" class="result-block" style="display:none"></div>
+      </section>
+    </div>
+
+    <!-- ═══ TAB: Admin Claims ═══ -->
+    <div class="tab-pane" id="tab-admin">
+      <section class="panel">
+        <h2>◤ CLAIM REVIEW</h2>
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="f-admin-key-claims" placeholder="Admin key"
+            style="font-family:var(--mono);font-size:0.8rem;background:rgba(10,5,30,0.8);
+            border:1px solid rgba(185,103,255,0.3);color:var(--ink);border-radius:6px;
+            padding:7px 12px;width:200px" />
+          <select id="claims-status-filter" style="font-family:var(--mono);font-size:0.8rem;
+            background:rgba(10,5,30,0.8);border:1px solid rgba(185,103,255,0.3);
+            color:var(--ink);border-radius:6px;padding:7px 10px">
+            <option value="pending">Pending</option>
+            <option value="">All</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <button class="ghost" id="btn-load-claims">↻ Load Claims</button>
+        </div>
+        <div id="claims-results">
+          <div class="empty-state">◈ Enter admin key and click "Load Claims"</div>
+        </div>
+      </section>
+    </div>
+
+  </main>
+
+  <!-- Claim Modal -->
+  <div id="claim-modal" style="display:none;position:fixed;inset:0;z-index:1000;
+    background:rgba(5,0,20,0.88);backdrop-filter:blur(6px);
+    display:none;align-items:center;justify-content:center">
+    <div style="max-width:520px;width:90%;background:rgba(10,5,30,0.98);
+      border:1px solid rgba(185,103,255,0.35);border-radius:12px;padding:28px 32px;
+      position:relative;max-height:90vh;overflow-y:auto">
+      <button onclick="closeClaimModal()" style="position:absolute;top:14px;right:16px;
+        background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer">✕</button>
+      <h3 style="font-family:var(--display);color:var(--pink);margin:0 0 6px">◤ CLAIM STATION</h3>
+      <div id="claim-modal-subtitle" style="font-family:var(--mono);font-size:0.78rem;color:var(--cyan);margin-bottom:20px"></div>
+
+      <div class="claim-form-wrap">
+        <div class="field"><label>FULL NAME *</label>
+          <input type="text" id="cm-name" placeholder="Your name" /></div>
+        <div class="field"><label>EMAIL *</label>
+          <input type="email" id="cm-email" placeholder="you@station.com" /></div>
+        <div class="field"><label>TITLE / ROLE</label>
+          <input type="text" id="cm-title" placeholder="Chief Engineer, GM, etc." /></div>
+        <div class="field"><label>CLAIM REASON</label>
+          <textarea id="cm-reason" placeholder="Brief description of your relationship to this facility…"></textarea></div>
+        <div class="field"><label>EVIDENCE TYPE</label>
+          <select id="cm-evtype">
+            <option value="">Select evidence type</option>
+            <option value="fcc_license">FCC License holder / grantee</option>
+            <option value="email_domain">Station email domain match</option>
+            <option value="station_contact">Listed station contact</option>
+            <option value="operator">Contracted operator / engineer</option>
+          </select>
+        </div>
+        <div class="field"><label>PI CODE (optional, 4 hex — enables RadioDNS bearer)</label>
+          <input type="text" id="cm-pi" placeholder="c479" maxlength="4" /></div>
+        <div class="field"><label>ECC (optional, 2 hex)</label>
+          <input type="text" id="cm-ecc" placeholder="e1" maxlength="2" /></div>
+        <div class="result-block info" style="font-size:0.74rem;margin:10px 0">
+          ◈ ZTR extended identity namespaces will be activated immediately upon approval.
+          Official RadioDNS bearer records are created <strong>only if</strong> valid PI and ECC are provided.
+          Analog AM facilities receive ZTR identity records only.
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="primary" id="btn-submit-claim">▶ SUBMIT CLAIM</button>
+          <button class="ghost" onclick="closeClaimModal()">CANCEL</button>
+        </div>
+        <div id="claim-modal-status" class="result-block" style="display:none;margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window._PDNS_ZONE = {{ pdns_zone | tojson }};
+  </script>
+  <script src="/static/registry.js"></script>
+</body>
+</html>
