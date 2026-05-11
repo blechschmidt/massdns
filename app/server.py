@@ -52,6 +52,15 @@ try:
               file=sys.stderr, flush=True)
     from rdns_routes import bp as rdns_bp, seed_db_if_empty  # noqa: E402
     app.register_blueprint(rdns_bp)
+
+    # ZTR Broadcast Identity Registry blueprint (non-fatal if import fails)
+    try:
+        from registry_routes import bp as registry_bp  # noqa: E402
+        app.register_blueprint(registry_bp)
+        print("[startup] registry blueprint registered", file=sys.stderr, flush=True)
+    except Exception as _re:
+        print(f"[startup] WARNING: registry blueprint failed to load: {_re}",
+              file=sys.stderr, flush=True)
     print(f"[startup] radiodns blueprint registered (db={RADIODNS_DB})",
           file=sys.stderr, flush=True)
     # Seed the SQLite DB with example stations on first boot so the

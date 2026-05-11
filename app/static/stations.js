@@ -114,18 +114,14 @@ function buildSvcFQDN(callsign) {
 // Bearer FQDN pattern: 5digits.4hex.3hex.fm.
 const BEARER_FQDN_RE = /^(\d{5})\.([0-9a-f]{4})\.([0-9a-f]{3})\.fm\./i;
 
-async function lookupStation() {
-  const raw = (document.getElementById('lookup-callsign').value || '').trim();
-  if (!raw) { alert('Enter a callsign or bearer FQDN'); return; }
-
+async function _doLookup(raw, showWeak = false) {
   const resultsEl = document.getElementById('lookup-results');
   resultsEl.style.display = 'block';
 
-  // Detect FQDN input
   const isFqdn = BEARER_FQDN_RE.test(raw);
   const url = isFqdn
     ? `/rdns/lookup?fqdn=${encodeURIComponent(raw)}`
-    : `/rdns/lookup?callsign=${encodeURIComponent(raw)}`;
+    : `/rdns/lookup?callsign=${encodeURIComponent(raw)}${showWeak ? '&show_weak=true' : ''}`;
 
   resultsEl.innerHTML = `<div class="loading">⋯ ${isFqdn ? 'parsing bearer FQDN' : 'searching ZTR DB + Radio Browser'}…</div>`;
 
@@ -137,59 +133,136 @@ async function lookupStation() {
       return;
     }
     if (!data.results || data.results.length === 0) {
-      resultsEl.innerHTML = `<div class="result-block info">◎ No results found for <strong>${escHtml(raw)}</strong>. Fill in the fields manually.</div>`;
+      let msg = `<div class="result-block info">◎ No results found for <strong>${escHtml(raw)}</strong>.`;
+      if ((data.hidden_count || 0) > 0) {
+        msg += ` <button onclick="_doLookup('${escHtml(raw)}',true)" style="background:none;border:none;color:var(--cyan);cursor:pointer;font-family:var(--mono);font-size:0.78rem;text-decoration:underline">Show ${data.hidden_count} low-confidence candidates</button>`;
+      }
+      msg += ` Fill in the fields manually.</div>`;
+      resultsEl.innerHTML = msg;
       return;
     }
-    renderLookupResults(data.results, resultsEl);
+    renderLookupResults(data.results, resultsEl, {
+      fcc_verified:  data.fcc_verified,
+      fcc_facility:  data.fcc_facility,
+      hidden_count:  data.hidden_count || 0,
+      query:         raw,
+    });
   } catch (e) {
     resultsEl.innerHTML = `<div class="result-block error">⚠ Network error: ${escHtml(e.message)}</div>`;
   }
 }
 
-function renderLookupResults(results, el) {
-  let html = `<div style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:8px">
-    ◈ ${results.length} result${results.length !== 1 ? 's' : ''} — click a row to autofill the form
-  </div><div style="display:flex;flex-direction:column;gap:6px">`;
+async function lookupStation() {
+  const raw = (document.getElementById('lookup-callsign').value || '').trim();
+  if (!raw) { alert('Enter a callsign or bearer FQDN'); return; }
+  await _doLookup(raw, false);
+}
+
+// ── Confidence label styling ───────────────────────────────────────────────
+
+const CONFIDENCE_COLORS = {
+  exact:    { border: 'rgba(108,255,214,0.4)', bg: 'rgba(108,255,214,0.05)', label: 'var(--ok)' },
+  strong:   { border: 'rgba(1,205,254,0.35)',  bg: 'rgba(1,205,254,0.04)',   label: 'var(--cyan)' },
+  possible: { border: 'rgba(255,209,102,0.35)',bg: 'rgba(255,209,102,0.04)', label: 'var(--warn)' },
+  weak:     { border: 'rgba(255,94,147,0.25)', bg: 'rgba(255,94,147,0.03)', label: 'rgba(255,94,147,0.6)' },
+  rejected: { border: 'rgba(255,94,147,0.15)', bg: 'transparent',           label: 'rgba(255,94,147,0.4)' },
+};
+
+const IDENTITY_STATUS_ICONS = {
+  observed:  '● OBSERVED',
+  generated: '◎ GENERATED',
+  claimed:   '◈ CLAIMED',
+  dormant:   '◈ DORMANT',
+  verified:  '✓ FCC VERIFIED',
+};
+
+function renderLookupResults(results, el, meta = {}) {
+  const total   = results.length;
+  const hidden  = meta.hidden_count || 0;
+  const fccVerified = meta.fcc_verified || false;
+  const fccFacility = meta.fcc_facility || null;
+
+  let hdr = `<div style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:8px">
+    ◈ ${total} result${total !== 1 ? 's' : ''}`;
+  if (fccFacility) {
+    hdr += ` · <span style="color:var(--ok)">✓ FCC: ${escHtml(fccFacility.callsign)} ${escHtml(fccFacility.frequency || '')} MHz · ${escHtml(fccFacility.city || '')} ${escHtml(fccFacility.state || '')}</span>`;
+  } else {
+    hdr += ` · <span style="color:var(--warn)">⚠ FCC facility not in registry</span>`;
+  }
+  if (hidden) {
+    hdr += ` · <button id="btn-show-weak" style="background:none;border:none;color:var(--muted);font-family:var(--mono);font-size:0.75rem;cursor:pointer;text-decoration:underline">show ${hidden} low-confidence candidate${hidden !== 1 ? 's' : ''}</button>`;
+  }
+  hdr += `</div><div style="display:flex;flex-direction:column;gap:6px">`;
+
+  let html = hdr;
 
   for (let i = 0; i < results.length; i++) {
     const s = results[i];
-    const freq = s.frequency ? `${s.frequency} MHz` : '—';
-    const loc = [s.state, s.country].filter(Boolean).join(', ') || '';
+    const cl    = s.confidence_label || 'weak';
+    const score = s.confidence_score ?? 0;
+    const cs    = CONFIDENCE_COLORS[cl] || CONFIDENCE_COLORS.weak;
+    const freq  = s.frequency ? `${escHtml(s.frequency)} ${s.band === 'AM' ? 'kHz' : 'MHz'}` : '—';
+    const loc   = [s.city, s.state].filter(Boolean).map(escHtml).join(', ') || '';
     const hasPi = s.pi_code && s.ecc;
-    const srcBadge = {
-      'ztr-db': '◈ ZTR DB',
-      'ztr-cname-scan': '◈ ZTR scan',
-      'ztr-candidates': '◈ ZTR candidates',
-      'fqdn-parse': '◈ FQDN',
-      'radio-browser': '◎ Radio Browser',
-    }[s.source] || s.source || '';
+    const statusIcon = IDENTITY_STATUS_ICONS[s.identity_status] || '';
+    const warnings = (s.warnings || []);
+
+    const srcLabel = {
+      'ztr-db':          '◈ ZTR DB',
+      'ztr-cname-scan':  '◈ ZTR scan',
+      'ztr-candidates':  '◎ ZTR generated',
+      'fqdn-parse':      '◈ FQDN',
+      'radio-browser':   '◎ Radio Browser',
+    }[s.source] || escHtml(s.source || '');
+
+    const callsignDisplay = s.callsign
+      ? escHtml(s.callsign)
+      : `<span style="color:rgba(255,94,147,0.4)">UNKNOWN</span>`;
 
     html += `<div class="lookup-row" data-idx="${i}" onclick="fillFromLookup(${i})" style="
       cursor:pointer;padding:10px 14px;border-radius:6px;
-      background:rgba(1,205,254,0.04);border:1px solid rgba(1,205,254,0.15);
-      display:flex;align-items:center;gap:14px;transition:background 0.15s
-    " onmouseover="this.style.background='rgba(1,205,254,0.1)'" onmouseout="this.style.background='rgba(1,205,254,0.04)'">
-      ${s.favicon ? `<img src="${escHtml(s.favicon)}" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">` : '<div style="width:32px;flex-shrink:0"></div>'}
+      background:${cs.bg};border:1px solid ${cs.border};
+      display:flex;align-items:flex-start;gap:14px;transition:background 0.15s
+    " onmouseover="this.style.background='${cs.bg.replace('0.0', '0.1')}'" onmouseout="this.style.background='${cs.bg}'">
+      ${s.favicon ? `<img src="${escHtml(s.favicon)}" alt="" style="width:30px;height:30px;object-fit:contain;border-radius:4px;flex-shrink:0;margin-top:2px" onerror="this.style.display='none'">` : '<div style="width:30px;flex-shrink:0"></div>'}
       <div style="flex:1;min-width:0">
-        <div style="color:var(--pink);font-family:var(--display);font-size:0.78rem;font-weight:bold">
-          ${escHtml(s.callsign || '—')}
-          <span style="color:var(--muted);font-size:0.68rem;margin-left:6px">${escHtml(srcBadge)}</span>
-          ${hasPi ? `<span style="color:var(--ok);font-size:0.68rem;margin-left:4px">● PI+ECC</span>` : ''}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="color:var(--pink);font-family:var(--display);font-size:0.8rem;font-weight:bold">${callsignDisplay}</span>
+          <span style="color:${cs.label};font-family:var(--mono);font-size:0.68rem;font-weight:bold">${cl.toUpperCase()} · ${score}%</span>
+          ${hasPi ? `<span style="color:var(--ok);font-size:0.67rem">● PI+ECC</span>` : ''}
+          ${s.fcc_verified ? `<span style="color:var(--ok);font-size:0.67rem">✓ FCC</span>` : `<span style="color:rgba(255,209,102,0.6);font-size:0.67rem">⚠ no FCC</span>`}
+          ${statusIcon ? `<span style="color:var(--muted);font-size:0.65rem">${statusIcon}</span>` : ''}
         </div>
-        <div style="color:var(--ink);font-size:0.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.name || s.bearer_fqdn || '')}</div>
-        <div style="color:var(--muted);font-size:0.72rem">
-          ${escHtml(freq)} · ${escHtml(s.band || 'FM')}
+        <div style="color:var(--muted);font-size:0.72rem;margin-top:3px">
+          ${freq} · ${escHtml(s.band || 'FM')}
           ${hasPi ? ` · PI <code style="color:var(--cyan)">${escHtml(s.pi_code)}</code> · ECC <code style="color:var(--cyan)">${escHtml(s.ecc)}</code>` : ''}
-          ${loc ? ` · ${escHtml(loc)}` : ''}
+          ${loc ? ` · ${loc}` : ''}
+          ${s.licensee ? ` · ${escHtml(s.licensee)}` : ''}
         </div>
+        ${s.facility_id ? `<div style="color:rgba(181,168,255,0.5);font-size:0.67rem;margin-top:2px">facility: ${escHtml(s.facility_id)}</div>` : ''}
+        ${warnings.length ? `<div style="color:rgba(255,209,102,0.7);font-size:0.67rem;margin-top:3px">⚠ ${warnings.map(escHtml).join(' · ')}</div>` : ''}
+        ${(s.match_reasons || []).length && cl !== 'weak' && cl !== 'rejected'
+          ? `<div style="color:rgba(108,255,214,0.4);font-size:0.65rem;margin-top:2px">${s.match_reasons.map(escHtml).join(' · ')}</div>` : ''}
+        <div style="color:var(--muted);font-size:0.65rem;margin-top:2px">${srcLabel}</div>
       </div>
-      ${s.homepage ? `<a href="${escHtml(s.homepage)}" target="_blank" onclick="event.stopPropagation()" style="color:var(--cyan);font-size:0.72rem;white-space:nowrap">↗ site</a>` : ''}
-      <span style="color:var(--muted);font-size:0.75rem;white-space:nowrap">▶ USE</span>
+      ${s.homepage ? `<a href="${escHtml(s.homepage)}" target="_blank" onclick="event.stopPropagation()" style="color:var(--cyan);font-size:0.7rem;white-space:nowrap;margin-top:2px">↗</a>` : ''}
+      <span style="color:${cs.label};font-size:0.72rem;white-space:nowrap;margin-top:2px;flex-shrink:0">▶ USE</span>
     </div>`;
   }
   html += '</div>';
   el.innerHTML = html;
   el._lookupResults = results;
+  el._lookupMeta = meta;
+
+  // Wire "show weak" button
+  const weakBtn = document.getElementById('btn-show-weak');
+  if (weakBtn) {
+    weakBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const cs = (document.getElementById('lookup-callsign').value || '').trim();
+      if (cs) _doLookup(cs, true);
+    });
+  }
 }
 
 window.fillFromLookup = function(idx) {
@@ -197,6 +270,21 @@ window.fillFromLookup = function(idx) {
   const results = resultsEl._lookupResults;
   if (!results || !results[idx]) return;
   const s = results[idx];
+
+  const cl = s.confidence_label || 'weak';
+
+  // Safeguard: warn on weak/rejected
+  if (cl === 'rejected') {
+    if (!confirm(
+      `⚠ This candidate has very low confidence (${s.confidence_score}%).\n\n` +
+      `Warnings:\n${(s.warnings || []).join('\n') || 'unknown reasons'}\n\n` +
+      `Use anyway? You will need to verify all fields manually.`
+    )) return;
+  } else if (cl === 'weak') {
+    if (!confirm(
+      `⚠ Low confidence match (${s.confidence_score}%).\n${(s.warnings || []).join('\n') || ''}\n\nContinue?`
+    )) return;
+  }
 
   const filled = [];
 
@@ -211,18 +299,24 @@ window.fillFromLookup = function(idx) {
   }
 
   const hasPi = s.pi_code && s.ecc;
-  resultsEl.innerHTML = `<div class="result-block ok">
+  const warnHtml = cl === 'possible'
+    ? `<br><span style="color:var(--warn);font-size:0.75rem">⚠ Possible match (${s.confidence_score}%) — verify frequency and PI code</span>`
+    : '';
+
+  resultsEl.innerHTML = `<div class="result-block ${cl === 'exact' || cl === 'strong' ? 'ok' : 'info'}">
     ✓ Autofilled: <strong>${filled.join(', ')}</strong>
+    · <span style="color:var(--muted);font-size:0.75rem">${cl} · ${s.confidence_score}%</span>
     ${s.homepage ? `· <a href="${escHtml(s.homepage)}" target="_blank" style="color:var(--cyan)">${escHtml(s.homepage)}</a>` : ''}
     ${hasPi
-      ? `<br><span style="color:var(--ok);font-size:0.78rem">● PI code and ECC filled from ZTR discovery data</span>`
+      ? `<br><span style="color:var(--ok);font-size:0.78rem">● PI code and ECC from ${s.identity_status === 'observed' ? 'ZTR discovery data' : 'candidate data — verify manually'}</span>`
       : `<br><span style="color:var(--warn);font-size:0.78rem">⚠ PI code and ECC not found — enter manually (check radiotext.fm or RDS data)</span>`}
+    ${s.fcc_verified ? `<br><span style="color:var(--ok);font-size:0.75rem">✓ FCC verified — facility ${escHtml(s.facility_id || '')} ${escHtml(s.city || '')} ${escHtml(s.state || '')}</span>` : `<br><span style="color:rgba(255,209,102,0.7);font-size:0.75rem">⚠ FCC facility not confirmed</span>`}
+    ${warnHtml}
   </div>`;
 
   updatePreview();
-  // Focus first empty required FM field
-  if (!s.pi_code) document.getElementById('f-pi').focus();
-  else if (!s.ecc) document.getElementById('f-ecc').focus();
+  if (!s.pi_code) document.getElementById('f-pi')?.focus();
+  else if (!s.ecc) document.getElementById('f-ecc')?.focus();
 };
 
 document.getElementById('btn-lookup').addEventListener('click', lookupStation);
@@ -792,4 +886,13 @@ document.getElementById('btn-refresh-stations').addEventListener('click', loadSt
 
 // ── Initial load ──────────────────────────────────────────────────────────
 loadStations();
+
+// Apply registry pre-fill if present (?callsign=&freq=&band=)
+if (typeof window._PREFILL !== 'undefined' && window._PREFILL) {
+  const pf = window._PREFILL;
+  if (pf.callsign) document.getElementById('f-callsign').value = pf.callsign;
+  if (pf.freq)     document.getElementById('f-freq').value     = pf.freq;
+  if (pf.band)     applyBand(pf.band);
+}
+
 updatePreview();

@@ -147,7 +147,7 @@
           <p class="tag">◈ RadioDNS Station Registry · {{ pdns_zone }}</p>
         </div>
       </div>
-      <p class="subtag"><a href="/">← back to scanner</a> · <a href="/rdns/info">/rdns/info</a> · <a href="/rdns/stations">/rdns/stations</a></p>
+      <p class="subtag"><a href="/">← back to scanner</a> · <a href="/rdns/registry">↗ identity registry</a> · <a href="/rdns/info">/rdns/info</a> · <a href="/rdns/stations">/rdns/stations</a></p>
     </header>
 
     <!-- ══════════ REGISTER STATION ══════════ -->
@@ -320,6 +320,8 @@
   <script>
     // Inject template variables for JS
     window._PDNS_ZONE = {{ pdns_zone | tojson }};
+    // Registry pre-fill (from ?callsign=&freq=&band= query params)
+    window._PREFILL = {{ prefill | tojson }};
   </script>
   <script src="/static/stations.js"></script>
 </body>

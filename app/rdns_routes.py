@@ -1077,28 +1077,203 @@ def _radio_browser_lookup(callsign: str, band: str = "FM") -> list:
     return results[:5]
 
 
+def _fcc_lookup_for_callsign(callsign: str) -> dict | None:
+    """Look up FCC facility for callsign from the registry DB if available."""
+    try:
+        from radiodns_mapper.db_compat import connect as _dbc
+        with _dbc(_ensure_db()) as conn:
+            row = conn.execute("""
+                SELECT facility_id, callsign, service, band, frequency,
+                       city, state, country, licensee, fac_status
+                FROM fcc_facilities
+                WHERE callsign = ?
+                ORDER BY CASE WHEN fac_status IN ('Licensed','LICEN') THEN 0 ELSE 1 END,
+                         CASE band WHEN 'FM' THEN 0 WHEN 'AM' THEN 1 ELSE 2 END
+                LIMIT 1
+            """, (callsign.upper().strip(),)).fetchone()
+            if row:
+                return {
+                    "facility_id": row[0],
+                    "callsign":    row[1],
+                    "service":     row[2],
+                    "band":        row[3],
+                    "frequency":   row[4],
+                    "city":        row[5],
+                    "state":       row[6],
+                    "country":     row[7],
+                    "licensee":    row[8],
+                    "fcc_status":  row[9],
+                }
+    except Exception:
+        pass
+    return None
+
+
+def _score_candidate(candidate: dict, query_callsign: str, fcc: dict | None) -> dict:
+    """Compute confidence score and enrich a lookup candidate.
+
+    Scoring rules (0–100 after clamp):
+      +40  exact callsign match
+      +30  FCC facility match found
+      +25  frequency matches FCC licensed frequency
+      +15  city/state in result (market signal)
+      +20  PI/ECC observed from ZTR scan/SDR pipeline
+      +20  RadioDNS CNAME already exists (cname-hit source)
+      +10  Radio Browser name similarity only (max, not stackable)
+      -20  missing FCC confirmation
+      -35  frequency mismatch from FCC record
+      -50  callsign mismatch (query != candidate callsign)
+      -25  inferred/generated PI with no scan evidence
+    """
+    score = 0
+    reasons: list[str] = []
+    warnings: list[str] = []
+
+    query_cs = query_callsign.upper().strip()
+    cand_cs  = (candidate.get("callsign") or "").upper().strip()
+    source   = candidate.get("source", "")
+    has_pi   = bool(candidate.get("pi_code")) and bool(candidate.get("ecc"))
+    cand_freq = str(candidate.get("frequency") or "").strip()
+
+    # ── Callsign match ──────────────────────────────────────────────────
+    if query_cs and cand_cs == query_cs:
+        score += 40
+        reasons.append("exact callsign match")
+    elif cand_cs and query_cs and cand_cs != query_cs:
+        score -= 50
+        warnings.append(f"callsign mismatch: query={query_cs} candidate={cand_cs}")
+
+    # ── FCC facility ────────────────────────────────────────────────────
+    if fcc:
+        score += 30
+        reasons.append(f"FCC facility match: {fcc.get('facility_id')} ({fcc.get('fcc_status','')})")
+
+        # Frequency vs FCC record
+        fcc_freq = str(fcc.get("frequency") or "").strip()
+        if cand_freq and fcc_freq:
+            try:
+                cf = round(float(cand_freq), 1)
+                ff = round(float(fcc_freq), 1)
+                if abs(cf - ff) < 0.15:
+                    score += 25
+                    reasons.append(f"frequency matches FCC record ({ff} MHz)")
+                else:
+                    score -= 35
+                    warnings.append(f"frequency mismatch: candidate={cf} FCC={ff}")
+            except ValueError:
+                pass
+    else:
+        score -= 20
+        warnings.append("FCC facility not found in registry (ingest FCC data to improve)")
+        candidate["fcc_verified"] = False
+
+    # ── City/state market signal ────────────────────────────────────────
+    if candidate.get("city") or candidate.get("state"):
+        score += 15
+        reasons.append("city/state location data present")
+
+    # ── PI/ECC source quality ───────────────────────────────────────────
+    observed_sources = {"ztr-db", "ztr-cname-scan", "fqdn-parse"}
+    if has_pi:
+        if source in observed_sources:
+            score += 20
+            reasons.append("PI/ECC from ZTR observed scan data")
+        else:
+            score -= 25
+            warnings.append("PI/ECC inferred or generated — not confirmed by scan")
+    # ── CNAME already exists ────────────────────────────────────────────
+    if source == "ztr-cname-scan":
+        score += 20
+        reasons.append("RadioDNS CNAME observed in wild (ZTR scan)")
+
+    # ── Radio Browser name-only match ───────────────────────────────────
+    if source == "radio-browser":
+        if not has_pi:
+            score = min(score, 10)
+            warnings.append("Radio Browser match: name similarity only, no RDS data")
+
+    score = max(0, min(100, score))
+
+    if score >= 80:
+        label = "exact"
+    elif score >= 60:
+        label = "strong"
+    elif score >= 40:
+        label = "possible"
+    elif score >= 20:
+        label = "weak"
+    else:
+        label = "rejected"
+
+    # ── identity_status ─────────────────────────────────────────────────
+    if source in ("ztr-db", "ztr-cname-scan"):
+        identity_status = "observed"
+        generated = False
+        observed_source = "ztr_pipeline"
+    elif source == "fqdn-parse":
+        identity_status = "observed"
+        generated = False
+        observed_source = "fqdn_parse"
+    elif source == "ztr-candidates":
+        identity_status = "generated"
+        generated = True
+        observed_source = None
+    else:
+        identity_status = "generated"
+        generated = True
+        observed_source = source or None
+
+    # FCC enrichment on the candidate
+    if fcc:
+        candidate.setdefault("facility_id", fcc.get("facility_id"))
+        candidate.setdefault("licensee",    fcc.get("licensee"))
+        candidate.setdefault("city",        fcc.get("city"))
+        candidate.setdefault("state",       fcc.get("state"))
+        candidate["fcc_verified"] = True
+        candidate["fcc_status"]   = fcc.get("fcc_status")
+    else:
+        candidate.setdefault("fcc_verified", False)
+        candidate.setdefault("facility_id", None)
+
+    candidate.update({
+        "confidence_score":  score,
+        "confidence_label":  label,
+        "match_reasons":     reasons,
+        "warnings":          warnings,
+        "identity_status":   identity_status,
+        "generated":         generated,
+        "observed_source":   observed_source,
+    })
+    return candidate
+
+
 @bp.get("/lookup")
 def station_lookup():
     """Look up station details by callsign or bearer FQDN.
 
     Query params:
-      callsign  — search by callsign (Radio Browser + ZTR pipeline DB)
-      fqdn      — parse a RadioDNS FM bearer FQDN directly (returns freq5/pi/ecc)
-      band      — FM (default) or AM
+      callsign   — search by callsign (ZTR pipeline DB + Radio Browser)
+      fqdn       — parse a RadioDNS FM bearer FQDN directly
+      band       — FM (default) or AM
+      show_weak  — include weak/rejected results (default false)
 
-    Returns list of matching station candidates with auto-fillable fields.
-    PI code and ECC are included when found in the ZTR discovery DB or
-    when parsed directly from a bearer FQDN.
+    Each result includes confidence_score (0–100), confidence_label
+    (exact/strong/possible/weak/rejected), match_reasons, warnings,
+    identity_status (observed/generated), and fcc_verified.
     """
     fqdn = (request.args.get("fqdn") or "").strip()
     if fqdn:
         parsed = _parse_bearer_fqdn(fqdn)
         if not parsed:
             return jsonify({"error": f"could not parse bearer FQDN: {fqdn!r}"}), 400
-        return jsonify({"fqdn": fqdn, "results": [{"name": fqdn, "callsign": "", "source": "fqdn-parse", **parsed}]})
+        cand = {"name": fqdn, "callsign": "", "source": "fqdn-parse", **parsed}
+        _score_candidate(cand, "", None)
+        return jsonify({"fqdn": fqdn, "results": [cand]})
 
     callsign = (request.args.get("callsign") or "").strip()
     band = (request.args.get("band") or "FM").strip().upper()
+    show_weak = request.args.get("show_weak", "false").lower() in ("1", "true", "yes")
+
     if not callsign:
         return jsonify({"error": "callsign or fqdn is required"}), 400
     if len(callsign) > 20:
@@ -1109,32 +1284,63 @@ def station_lookup():
     rb_results = _radio_browser_lookup(callsign, band)
 
     # Merge: enrich DB results with Radio Browser metadata (homepage, favicon, etc.)
-    # and append any Radio Browser-only results not already covered
-    db_callsigns = {r.get("callsign", "").upper() for r in results}
     for rb in rb_results:
         matched = False
         for db in results:
-            if not db.get("homepage") and rb.get("homepage"):
-                db["homepage"] = rb["homepage"]
-                db["favicon"] = rb.get("favicon", "")
-                db["countrycode"] = rb.get("countrycode", "")
-                db["country"] = rb.get("country", "")
-                db["state"] = rb.get("state", "")
-                db["tags"] = rb.get("tags", "")
-                db["stream_url"] = rb.get("stream_url", "")
+            if db.get("callsign", "").upper() == rb.get("callsign", "").upper():
+                if not db.get("homepage") and rb.get("homepage"):
+                    db["homepage"]    = rb["homepage"]
+                    db["favicon"]     = rb.get("favicon", "")
+                    db["countrycode"] = rb.get("countrycode", "")
+                    db["country"]     = rb.get("country", "")
+                    db["state"]       = rb.get("state", "")
+                    db["tags"]        = rb.get("tags", "")
+                    db["stream_url"]  = rb.get("stream_url", "")
                 matched = True
                 break
         if not matched:
             results.append(rb)
 
-    return jsonify({"callsign": callsign, "results": results[:8]})
+    # FCC enrichment (single lookup for the queried callsign)
+    fcc = _fcc_lookup_for_callsign(callsign)
+
+    # Score all candidates
+    for c in results:
+        _score_candidate(c, callsign, fcc)
+
+    # Sort: highest confidence first, then by source quality
+    results.sort(key=lambda c: (-c.get("confidence_score", 0),
+                                 0 if c.get("source") in ("ztr-db","ztr-cname-scan") else 1))
+
+    # Filter out weak/rejected by default
+    if not show_weak:
+        visible  = [c for c in results if c.get("confidence_label") not in ("weak", "rejected")]
+        hidden   = [c for c in results if c.get("confidence_label") in ("weak", "rejected")]
+    else:
+        visible  = results
+        hidden   = []
+
+    return jsonify({
+        "callsign":       callsign,
+        "fcc_verified":   fcc is not None,
+        "fcc_facility":   fcc,
+        "results":        visible[:8],
+        "hidden_count":   len(hidden),
+        "show_weak_url":  f"/rdns/lookup?callsign={callsign}&show_weak=true",
+    })
 
 
 @bp.get("/onboard")
 def onboard_ui():
-    from flask import render_template
+    from flask import render_template, request as _req
     zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
     epg = os.environ.get("EPG_HOST", "epg.zerotrustradio.org")
+    # Registry pre-fill via query string (?callsign=KSLX&freq=95.9&band=FM)
+    prefill = {
+        "callsign": _req.args.get("callsign", ""),
+        "freq":     _req.args.get("freq", ""),
+        "band":     _req.args.get("band", "FM").upper(),
+    }
     return render_template(
         "onboard.html",
         pdns_zone=zone,
@@ -1143,6 +1349,7 @@ def onboard_ui():
         provider_default=os.environ.get("PROVIDER_NAME", "Zero Trust Radio"),
         website_default=os.environ.get("PROVIDER_WEBSITE", "https://zerotrustradio.org"),
         contact_default=os.environ.get("CONTACT_EMAIL", "ops@zerotrustradio.org"),
+        prefill=prefill,
     )
 
 
