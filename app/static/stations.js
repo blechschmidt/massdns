@@ -111,23 +111,33 @@ function buildSvcFQDN(callsign) {
 
 // ── Station Lookup ────────────────────────────────────────────────────────
 
+// Bearer FQDN pattern: 5digits.4hex.3hex.fm.
+const BEARER_FQDN_RE = /^(\d{5})\.([0-9a-f]{4})\.([0-9a-f]{3})\.fm\./i;
+
 async function lookupStation() {
-  const callsign = (document.getElementById('lookup-callsign').value || '').trim();
-  if (!callsign) { alert('Enter a callsign to look up'); return; }
+  const raw = (document.getElementById('lookup-callsign').value || '').trim();
+  if (!raw) { alert('Enter a callsign or bearer FQDN'); return; }
 
   const resultsEl = document.getElementById('lookup-results');
   resultsEl.style.display = 'block';
-  resultsEl.innerHTML = '<div class="loading">⋯ searching Radio Browser…</div>';
+
+  // Detect FQDN input
+  const isFqdn = BEARER_FQDN_RE.test(raw);
+  const url = isFqdn
+    ? `/rdns/lookup?fqdn=${encodeURIComponent(raw)}`
+    : `/rdns/lookup?callsign=${encodeURIComponent(raw)}`;
+
+  resultsEl.innerHTML = `<div class="loading">⋯ ${isFqdn ? 'parsing bearer FQDN' : 'searching ZTR DB + Radio Browser'}…</div>`;
 
   try {
-    const resp = await fetch(`/rdns/lookup?callsign=${encodeURIComponent(callsign)}`);
+    const resp = await fetch(url);
     const data = await resp.json();
     if (!resp.ok) {
       resultsEl.innerHTML = `<div class="result-block error">⚠ ${escHtml(data.error || 'lookup failed')}</div>`;
       return;
     }
     if (!data.results || data.results.length === 0) {
-      resultsEl.innerHTML = `<div class="result-block info">◎ No results found for <strong>${escHtml(callsign)}</strong> in Radio Browser. Fill in the fields manually.</div>`;
+      resultsEl.innerHTML = `<div class="result-block info">◎ No results found for <strong>${escHtml(raw)}</strong>. Fill in the fields manually.</div>`;
       return;
     }
     renderLookupResults(data.results, resultsEl);
@@ -144,7 +154,16 @@ function renderLookupResults(results, el) {
   for (let i = 0; i < results.length; i++) {
     const s = results[i];
     const freq = s.frequency ? `${s.frequency} MHz` : '—';
-    const loc = [s.state, s.country].filter(Boolean).join(', ') || '—';
+    const loc = [s.state, s.country].filter(Boolean).join(', ') || '';
+    const hasPi = s.pi_code && s.ecc;
+    const srcBadge = {
+      'ztr-db': '◈ ZTR DB',
+      'ztr-cname-scan': '◈ ZTR scan',
+      'ztr-candidates': '◈ ZTR candidates',
+      'fqdn-parse': '◈ FQDN',
+      'radio-browser': '◎ Radio Browser',
+    }[s.source] || s.source || '';
+
     html += `<div class="lookup-row" data-idx="${i}" onclick="fillFromLookup(${i})" style="
       cursor:pointer;padding:10px 14px;border-radius:6px;
       background:rgba(1,205,254,0.04);border:1px solid rgba(1,205,254,0.15);
@@ -152,9 +171,17 @@ function renderLookupResults(results, el) {
     " onmouseover="this.style.background='rgba(1,205,254,0.1)'" onmouseout="this.style.background='rgba(1,205,254,0.04)'">
       ${s.favicon ? `<img src="${escHtml(s.favicon)}" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">` : '<div style="width:32px;flex-shrink:0"></div>'}
       <div style="flex:1;min-width:0">
-        <div style="color:var(--pink);font-family:var(--display);font-size:0.78rem;font-weight:bold">${escHtml(s.callsign)}</div>
-        <div style="color:var(--ink);font-size:0.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.name)}</div>
-        <div style="color:var(--muted);font-size:0.72rem">${escHtml(freq)} · ${escHtml(s.band)} · ${escHtml(loc)}</div>
+        <div style="color:var(--pink);font-family:var(--display);font-size:0.78rem;font-weight:bold">
+          ${escHtml(s.callsign || '—')}
+          <span style="color:var(--muted);font-size:0.68rem;margin-left:6px">${escHtml(srcBadge)}</span>
+          ${hasPi ? `<span style="color:var(--ok);font-size:0.68rem;margin-left:4px">● PI+ECC</span>` : ''}
+        </div>
+        <div style="color:var(--ink);font-size:0.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.name || s.bearer_fqdn || '')}</div>
+        <div style="color:var(--muted);font-size:0.72rem">
+          ${escHtml(freq)} · ${escHtml(s.band || 'FM')}
+          ${hasPi ? ` · PI <code style="color:var(--cyan)">${escHtml(s.pi_code)}</code> · ECC <code style="color:var(--cyan)">${escHtml(s.ecc)}</code>` : ''}
+          ${loc ? ` · ${escHtml(loc)}` : ''}
+        </div>
       </div>
       ${s.homepage ? `<a href="${escHtml(s.homepage)}" target="_blank" onclick="event.stopPropagation()" style="color:var(--cyan);font-size:0.72rem;white-space:nowrap">↗ site</a>` : ''}
       <span style="color:var(--muted);font-size:0.75rem;white-space:nowrap">▶ USE</span>
@@ -162,40 +189,43 @@ function renderLookupResults(results, el) {
   }
   html += '</div>';
   el.innerHTML = html;
-  // Store results for fillFromLookup
   el._lookupResults = results;
 }
 
-window._lookupResults = [];
 window.fillFromLookup = function(idx) {
   const resultsEl = document.getElementById('lookup-results');
   const results = resultsEl._lookupResults;
   if (!results || !results[idx]) return;
   const s = results[idx];
 
-  // Set callsign
-  if (s.callsign) document.getElementById('f-callsign').value = s.callsign;
-  // Set frequency if parseable
-  if (s.frequency) document.getElementById('f-freq').value = s.frequency;
-  // Set band
+  const filled = [];
+
+  if (s.callsign) { document.getElementById('f-callsign').value = s.callsign; filled.push('callsign'); }
+  if (s.frequency) { document.getElementById('f-freq').value = s.frequency; filled.push('frequency'); }
+  if (s.pi_code)  { document.getElementById('f-pi').value  = s.pi_code;  filled.push('PI code'); }
+  if (s.ecc)      { document.getElementById('f-ecc').value  = s.ecc;      filled.push('ECC'); }
+  if (s.homepage) { document.getElementById('f-website').value = s.homepage; filled.push('website'); }
+
   if (s.band) {
     const band = s.band.toUpperCase();
     document.getElementById('f-band').value = band;
     document.querySelectorAll('.band-btn').forEach(b => b.classList.toggle('active', b.dataset.band === band));
     document.querySelectorAll('.fm-only').forEach(el => el.classList.toggle('hidden', band !== 'FM'));
   }
-  // Set website
-  if (s.homepage) document.getElementById('f-website').value = s.homepage;
 
-  // Collapse results and show confirmation
+  const hasPi = s.pi_code && s.ecc;
   resultsEl.innerHTML = `<div class="result-block ok">
-    ✓ Autofilled from <strong>${escHtml(s.name)}</strong>
+    ✓ Autofilled: <strong>${filled.join(', ')}</strong>
     ${s.homepage ? `· <a href="${escHtml(s.homepage)}" target="_blank" style="color:var(--cyan)">${escHtml(s.homepage)}</a>` : ''}
-    <br><span style="color:var(--muted);font-size:0.78rem">PI code and ECC still need to be entered manually.</span>
+    ${hasPi
+      ? `<br><span style="color:var(--ok);font-size:0.78rem">● PI code and ECC filled from ZTR discovery data</span>`
+      : `<br><span style="color:var(--warn);font-size:0.78rem">⚠ PI code and ECC not found — enter manually (check radiotext.fm or RDS data)</span>`}
   </div>`;
 
   updatePreview();
-  document.getElementById('f-pi').focus();
+  // Focus first empty required FM field
+  if (!s.pi_code) document.getElementById('f-pi').focus();
+  else if (!s.ecc) document.getElementById('f-ecc').focus();
 };
 
 document.getElementById('btn-lookup').addEventListener('click', lookupStation);

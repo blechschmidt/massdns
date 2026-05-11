@@ -155,11 +155,11 @@
       <h2>◤ REGISTER STATION</h2>
 
       <!-- Station lookup -->
-      <div class="row" style="margin-bottom:14px">
+      <div class="row" style="margin-bottom:8px">
         <label class="field grow">
-          <span class="lbl">◢ LOOKUP CALLSIGN <em>// pull details from Radio Browser + FCC</em></span>
+          <span class="lbl">◢ LOOKUP <em>// callsign or bearer FQDN · pulls from ZTR pipeline DB + Radio Browser</em></span>
           <div style="display:flex;gap:8px">
-            <input type="text" id="lookup-callsign" placeholder="KQED, WXYZ, NTS1…" autocomplete="off" spellcheck="false" style="flex:1" />
+            <input type="text" id="lookup-callsign" placeholder="WBKV  or  10250.5865.5a0.fm.radiodns.org" autocomplete="off" spellcheck="false" style="flex:1;font-family:var(--mono)" />
             <button class="ghost" id="btn-lookup" style="white-space:nowrap">↗ LOOKUP</button>
           </div>
         </label>
