@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZERO TRUST RADIO · Hybrid Radio Infrastructure</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Orbitron:wght@500;700;900&family=VT323&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+</head>
+<body>
+  <div class="bg-sky"></div>
+  <div class="bg-stars"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-scanlines"></div>
+
+  <main>
+    <header>
+      <div class="brand">
+        <img class="logo" src="{{ url_for('static', filename='logo.svg') }}" alt="" />
+        <div class="title">
+          <h1 data-text="ZERO TRUST RADIO">ZERO TRUST RADIO</h1>
+          <p class="tag">▒░ hybrid  radio  infrastructure  ░ ▒  powered  by  massdns  ░▒</p>
+        </div>
+      </div>
+      <p class="subtag">📡 connected radio · managed RadioDNS · DNS scanning engine · broadcasting from the cloud ▶</p>
+    </header>
+
+    <!-- Platform CTA -->
+    <div class="platform-bar">
+      <div class="platform-bar-left">
+        <span class="platform-label">PLATFORM</span>
+        <span class="platform-desc">Station registration · SPI metadata · PowerDNS provisioning · DO Spaces CDN</span>
+      </div>
+      <a href="/service" class="platform-cta">▶ LAUNCH HYBRID RADIO INFRASTRUCTURE</a>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="resolver">◤ dns scanner</button>
+      <button class="tab" data-tab="pipeline">◤ discovery pipeline</button>
+      <button class="tab" data-tab="db">◤ scan database</button>
+    </nav>
+
+    <!-- ===================== DNS SCANNER TAB ===================== -->
+    <section class="tab-panel active" data-tab="resolver">
+      <section class="panel">
+        <p class="hint" style="margin-bottom:1rem">Bulk DNS resolver powered by massdns — used internally to verify RadioDNS CNAME and SRV records at scale.</p>
+        <div class="row">
+          <label class="field grow">
+            <span class="lbl">◢ DOMAINS <em>// one per line · max {{ max_domains }}</em></span>
+            <textarea id="domains" spellcheck="false" placeholder="example.com&#10;cloudflare.com&#10;github.com"></textarea>
+          </label>
+        </div>
+
+        <div class="row controls">
+          <label class="field">
+            <span class="lbl">◢ RECORD</span>
+            <select id="type">
+              {% for t in allowed_types %}
+                <option value="{{ t }}"{% if t == 'A' %} selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <div class="actions">
+            <button id="run" class="primary">▶ R E S O L V E</button>
+            <button id="stop" class="ghost" disabled>■ STOP</button>
+            <button id="clear" class="ghost">✕ CLEAR</button>
+          </div>
+
+          <div class="stats" id="stats">
+            <span class="pill" id="status-pill">idle</span>
+            <span class="metric"><b id="count">0</b> hits</span>
+            <span class="metric"><b id="elapsed">0.0s</b></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="results">
+        <div class="results-head">
+          <h2>◤ T R A N S M I S S I O N</h2>
+          <div class="view-toggle">
+            <button data-view="pretty" class="active">pretty</button>
+            <button data-view="raw">ndjson</button>
+          </div>
+        </div>
+        <div id="pretty" class="view active"></div>
+        <pre id="raw" class="view"></pre>
+      </section>
+    </section>
+
+    <!-- ===================== PIPELINE TAB ===================== -->
+    <section class="tab-panel" data-tab="pipeline">
+      <p class="hint">
+        RadioDNS discovery pipeline — scans the FM band to find broadcaster CNAMEs and SRV endpoints.
+        Results feed the <a href="/service" style="color:var(--cyan)">Hybrid Radio Infrastructure</a> station database.
+      </p>
+
+      <!-- step 1: generate -->
+      <details class="step" open>
+        <summary><span class="step-num">1</span> generate FM bearer FQDNs</summary>
+        <div class="step-body">
+          <div class="step-grid">
+            <label class="field"><span class="lbl">ECC list</span>
+              <input id="g-ecc" value="e0,e1,d0,f0,a0,c0" /></label>
+            <label class="field"><span class="lbl">PI start</span>
+              <input id="g-pi-start" value="0000" /></label>
+            <label class="field"><span class="lbl">PI end</span>
+              <input id="g-pi-end" value="ffff" /></label>
+            <label class="field"><span class="lbl">freq start (10 kHz)</span>
+              <input id="g-freq-start" value="8750" /></label>
+            <label class="field"><span class="lbl">freq end (10 kHz)</span>
+              <input id="g-freq-end" value="10800" /></label>
+            <label class="field"><span class="lbl">freq step</span>
+              <input id="g-freq-step" value="10" /></label>
+            <label class="field"><span class="lbl">limit (optional)</span>
+              <input id="g-limit" placeholder="e.g. 100000" /></label>
+          </div>
+          <div class="step-actions">
+            <button class="primary" data-step="generate">▶ generate</button>
+            <button class="ghost" data-stop>■ stop</button>
+            <span class="step-stat" data-stat="generate">idle</span>
+          </div>
+          <pre class="step-out" data-out="generate"></pre>
+        </div>
+      </details>
+
+      <!-- step 2: scan-cname -->
+      <details class="step">
+        <summary><span class="step-num">2</span> scan CNAME (massdns)</summary>
+        <div class="step-body">
+          <div class="step-grid">
+            <label class="field"><span class="lbl">rate (-s)</span>
+              <input id="sc-rate" value="1000" /></label>
+            <label class="field grow"><span class="lbl">domains override (one per line, blank = use DB candidates)</span>
+              <textarea id="sc-domains" spellcheck="false" placeholder="leave blank to scan candidate_domains from the DB"></textarea></label>
+          </div>
+          <div class="step-actions">
+            <button class="primary" data-step="scan-cname">▶ scan CNAME</button>
+            <button class="ghost" data-stop>■ stop</button>
+            <span class="step-stat" data-stat="scan-cname">idle</span>
+          </div>
+          <pre class="step-out" data-out="scan-cname"></pre>
+        </div>
+      </details>
+
+      <!-- step 3: extract-broadcasters -->
+      <details class="step">
+        <summary><span class="step-num">3</span> extract broadcasters</summary>
+        <div class="step-body">
+          <div class="step-actions">
+            <button class="primary" data-step="extract-broadcasters">▶ extract</button>
+            <span class="step-stat" data-stat="extract-broadcasters">idle</span>
+          </div>
+          <pre class="step-out" data-out="extract-broadcasters"></pre>
+        </div>
+      </details>
+
+      <!-- step 4: generate-srv -->
+      <details class="step">
+        <summary><span class="step-num">4</span> generate SRV lookup names</summary>
+        <div class="step-body">
+          <div class="step-grid">
+            <label class="field grow"><span class="lbl">services (comma)</span>
+              <input id="gs-services" value="_radioepg._tcp,_radiovis._tcp" /></label>
+          </div>
+          <div class="step-actions">
+            <button class="primary" data-step="generate-srv">▶ generate SRV</button>
+            <span class="step-stat" data-stat="generate-srv">idle</span>
+          </div>
+          <pre class="step-out" data-out="generate-srv"></pre>
+        </div>
+      </details>
+
+      <!-- step 5: scan-srv -->
+      <details class="step">
+        <summary><span class="step-num">5</span> scan SRV (massdns)</summary>
+        <div class="step-body">
+          <div class="step-grid">
+            <label class="field"><span class="lbl">rate (-s)</span>
+              <input id="ss-rate" value="500" /></label>
+            <label class="field"><span class="lbl">services</span>
+              <input id="ss-services" value="_radioepg._tcp,_radiovis._tcp" /></label>
+          </div>
+          <div class="step-actions">
+            <button class="primary" data-step="scan-srv">▶ scan SRV</button>
+            <button class="ghost" data-stop>■ stop</button>
+            <span class="step-stat" data-stat="scan-srv">idle</span>
+          </div>
+          <pre class="step-out" data-out="scan-srv"></pre>
+        </div>
+      </details>
+
+      <!-- step 6: fetch-si -->
+      <details class="step">
+        <summary><span class="step-num">6</span> fetch SI.xml</summary>
+        <div class="step-body">
+          <div class="step-grid">
+            <label class="field"><span class="lbl">timeout (s)</span>
+              <input id="fs-timeout" value="8" /></label>
+            <label class="field"><span class="lbl">http only</span>
+              <select id="fs-http-only"><option value="false" selected>no (try https fallback)</option><option value="true">yes</option></select></label>
+          </div>
+          <div class="step-actions">
+            <button class="primary" data-step="fetch-si">▶ fetch SI.xml</button>
+            <button class="ghost" data-stop>■ stop</button>
+            <span class="step-stat" data-stat="fetch-si">idle</span>
+          </div>
+          <pre class="step-out" data-out="fetch-si"></pre>
+        </div>
+      </details>
+
+      <!-- step 7: parse-si -->
+      <details class="step">
+        <summary><span class="step-num">7</span> parse SI.xml → stations</summary>
+        <div class="step-body">
+          <div class="step-actions">
+            <button class="primary" data-step="parse-si">▶ parse SI</button>
+            <span class="step-stat" data-stat="parse-si">idle</span>
+          </div>
+          <pre class="step-out" data-out="parse-si"></pre>
+        </div>
+      </details>
+
+      <!-- step 8: expand-hits -->
+      <details class="step">
+        <summary><span class="step-num">8</span> expand around confirmed hits</summary>
+        <div class="step-body">
+          <div class="step-grid">
+            <label class="field"><span class="lbl">PI window (±)</span>
+              <input id="x-window" value="32" /></label>
+            <label class="field"><span class="lbl">freq window (steps, ±)</span>
+              <input id="x-freq-window" value="0" /></label>
+            <label class="field"><span class="lbl">freq step</span>
+              <input id="x-freq-step" value="10" /></label>
+            <label class="field"><span class="lbl">persist to DB</span>
+              <select id="x-persist"><option value="true" selected>yes</option><option value="false">no</option></select></label>
+          </div>
+          <div class="step-actions">
+            <button class="primary" data-step="expand-hits">▶ expand</button>
+            <span class="step-stat" data-stat="expand-hits">idle</span>
+          </div>
+          <pre class="step-out" data-out="expand-hits"></pre>
+        </div>
+      </details>
+    </section>
+
+    <!-- ===================== DATABASE TAB ===================== -->
+    <section class="tab-panel" data-tab="db">
+      <div class="db-controls">
+        <button class="primary" id="db-refresh">↻ refresh counts</button>
+        <a class="ghost btn-link" href="/rdns/db/download">⤓ download .sqlite</a>
+        <a class="ghost btn-link" href="/rdns/db/export-stations">⤓ export stations.jsonl</a>
+        <button class="ghost danger" id="db-reset">✕ reset DB</button>
+      </div>
+      <div class="db-summary" id="db-summary"></div>
+      <div class="db-tables">
+        <nav class="db-table-tabs" id="db-table-tabs">
+          <button class="db-tab active" data-table="candidate_domains">candidates</button>
+          <button class="db-tab" data-table="cname_hits">cname_hits</button>
+          <button class="db-tab" data-table="srv_records">srv_records</button>
+          <button class="db-tab" data-table="si_documents">si_documents</button>
+          <button class="db-tab" data-table="stations">stations</button>
+          <button class="db-tab" data-table="bearers">bearers</button>
+          <button class="db-tab" data-table="media">media</button>
+        </nav>
+        <div class="db-table-view" id="db-table-view"></div>
+      </div>
+    </section>
+
+    <footer>
+      <a href="/service">◉ hybrid radio platform</a> · <code>POST /resolve</code> · <a href="/api">/api</a> · <a href="/rdns/info">/rdns/info</a> · <a href="/healthz">/healthz</a>
+      <div class="copy">▼ ｚｅｒｏ ｔｒｕｓｔ ｒａｄｉｏ · massdns DNS engine · broadcasting from the cloud horizon ▼</div>
+    </footer>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='rdns.js') }}"></script>
+</body>
+</html>

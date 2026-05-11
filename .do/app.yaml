@@ -1,0 +1,89 @@
+name: massdns-api
+region: nyc
+services:
+  - name: api
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: chelstein/massdns
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    routes:
+      - path: /
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 10
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: MAX_DOMAINS
+        value: "10000"
+        scope: RUN_TIME
+
+  - name: radio-service
+    dockerfile_path: service/Dockerfile
+    source_dir: /
+    github:
+      repo: chelstein/massdns
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    routes:
+      - path: /service
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 15
+      period_seconds: 20
+      timeout_seconds: 10
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: NODE_ENV
+        value: "production"
+        scope: RUN_TIME
+      - key: PDNS_API_URL
+        value: "http://147.182.190.208:8081/api/v1"
+        scope: RUN_TIME
+      - key: PDNS_ZONE
+        value: "radiodns.zerotrustradio.org"
+        scope: RUN_TIME
+      - key: PDNS_SERVER
+        value: "localhost"
+        scope: RUN_TIME
+      - key: PDNS_TTL
+        value: "300"
+        scope: RUN_TIME
+      - key: EPG_HOST
+        value: "epg.zerotrustradio.org"
+        scope: RUN_TIME
+      - key: EPG_CDN_URL
+        value: "https://epg.zerotrustradio.org"
+        scope: RUN_TIME
+      - key: DO_SPACES_REGION
+        value: "atl1"
+        scope: RUN_TIME
+      - key: PDNS_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADMIN_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_BUCKET
+        scope: RUN_TIME
+        type: SECRET
