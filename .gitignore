@@ -15,3 +15,5 @@ cmake-build-debug/
 *.ignore
 *.pyc
 .vscode
+node_modules/
+package-lock.json
