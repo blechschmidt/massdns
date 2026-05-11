@@ -866,19 +866,16 @@ def _parse_freq_for_band(band: str, frequency: str):
         return f"{freq_10khz:05d}", freq_10khz, None
 
     if band == "AM":
-        # Accept kHz integer
-        if val_f != round(val_f):
-            return None, None, "AM frequency must be a whole number of kHz (e.g. 780)"
+        # DRM/AMSS — accept kHz shortwave frequency (no strict range limit)
         freq_khz = round(val_f)
-        if not (_AM_FREQ_MIN <= freq_khz <= _AM_FREQ_MAX):
-            return None, None, (
-                f"AM frequency must be {_AM_FREQ_MIN}–{_AM_FREQ_MAX} kHz "
-                f"(got {frequency!r})"
-            )
         return None, freq_khz, None
 
+    if band == "DAB":
+        # DAB doesn't use a frequency in the FQDN — skip range validation
+        return None, None, None
+
     if band == "HD":
-        return None, None, "HD band is not yet implemented; use FM or AM"
+        return None, None, "HD band is not yet implemented"
 
     return None, None, f"unsupported band: {band}"
 
@@ -1207,7 +1204,7 @@ def create_station():
 
     if not callsign:
         return jsonify({"error": "callsign is required"}), 400
-    if band not in ("FM", "AM", "HD", "STREAMING"):
+    if band not in ("FM", "AM", "DAB", "HD", "STREAMING"):
         return jsonify({"error": f"unsupported band: {band}"}), 400
 
     import re as _re
@@ -1218,11 +1215,17 @@ def create_station():
 
     pi_code = (body.get("pi_code") or "").strip().lower()
     ecc = (body.get("ecc") or "").strip().lower()
+    country_code = (body.get("country_code") or "").strip().upper()
     epg_host = (body.get("epg_host") or os.environ.get("EPG_HOST", "epg.zerotrustradio.org")).strip()
     spi_host = (body.get("spi_host") or os.environ.get("SPI_HOST", epg_host)).strip()
     website = (body.get("website") or "").strip()
     contact_email = (body.get("contact_email") or "").strip()
     provider_name = (body.get("provider_name") or "").strip()
+    # DAB-specific fields
+    dab_eid   = (body.get("eid") or "").strip().lower()
+    dab_sid   = (body.get("sid") or "").strip().lower()
+    dab_scids = (body.get("scids") or "0").strip().lower()
+    dab_gcc   = (body.get("gcc_dab") or "").strip().lower()
 
     zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
 
@@ -1233,64 +1236,85 @@ def create_station():
 
     freq5_str = None
     gcc = None
-    managed_fqdn = None   # CNAME source in our zone
-    bearer_fqdn = None    # public radiodns.org bearer
+    managed_fqdn = None
+    bearer_fqdn = None
+    country_bearer_fqdn = None   # ISO country fallback bearer
     svc_fqdn = f"{callsign_clean}.svc.{zone}"
     records = []
 
     if band == "FM":
         if not pi_code:
             return jsonify({"error": "pi_code is required for FM band"}), 400
-        if not ecc:
-            return jsonify({"error": "ecc is required for FM band"}), 400
+        # ECC is required UNLESS an ISO country code fallback is provided
+        if not ecc and not country_code:
+            return jsonify({"error": "ecc is required for FM band (or provide country_code as fallback)"}), 400
         try:
             from radiodns_mapper.generator import (
                 build_gcc, normalize_pi, normalize_ecc,
             )
             pi_norm = normalize_pi(pi_code)
-            ecc_norm = normalize_ecc(ecc)
-            gcc = build_gcc(pi_norm, ecc_norm)
             freq5_str = freq5
-            managed_fqdn = f"{freq5_str}.{pi_norm}.{gcc}.fm.{zone}"
-            bearer_fqdn = f"{freq5_str}.{pi_norm}.{gcc}.{PUBLIC_RADIODNS_SUFFIX}"
+
+            if ecc:
+                ecc_norm = normalize_ecc(ecc)
+                gcc = build_gcc(pi_norm, ecc_norm)
+                managed_fqdn = f"{freq5_str}.{pi_norm}.{gcc}.fm.{zone}"
+                bearer_fqdn = f"{freq5_str}.{pi_norm}.{gcc}.{PUBLIC_RADIODNS_SUFFIX}"
+            else:
+                # Country code fallback (spec §5.1.1)
+                import re as _rec
+                if not _rec.match(r'^[A-Z]{2}$', country_code):
+                    return jsonify({"error": "country_code must be a 2-letter ISO 3166-1 code (e.g. US, GB)"}), 400
+                managed_fqdn = f"{freq5_str}.{pi_norm}.{country_code.lower()}.fm.{zone}"
+                bearer_fqdn = f"{freq5_str}.{pi_norm}.{country_code.lower()}.{PUBLIC_RADIODNS_SUFFIX}"
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
         if not _validate_zone(managed_fqdn, zone):
             return jsonify({"error": f"generated FQDN is outside zone {zone}"}), 400
 
-        records.append({
-            "fqdn": managed_fqdn,
-            "record_type": "CNAME",
-            "record_value": _abs_dot(svc_fqdn),
-            "ttl": 300,
-        })
-        records.append({
-            "fqdn": f"_radioepg._tcp.{svc_fqdn}",
-            "record_type": "SRV",
-            "record_value": f"0 100 80 {_abs_dot(epg_host)}",
-            "ttl": 300,
-        })
-        records.append({
-            "fqdn": f"_radiospi._tcp.{svc_fqdn}",
-            "record_type": "SRV",
-            "record_value": f"0 100 80 {_abs_dot(spi_host)}",
-            "ttl": 300,
-        })
+        # Also build country-fallback bearer if ECC is known (for reference)
+        if ecc and country_code and _re.match(r'^[A-Z]{2}$', country_code):
+            try:
+                pi_norm2 = normalize_pi(pi_code)
+                country_bearer_fqdn = f"{freq5_str}.{pi_norm2}.{country_code.lower()}.{PUBLIC_RADIODNS_SUFFIX}"
+            except Exception:
+                pass
+
+        records.append({"fqdn": managed_fqdn, "record_type": "CNAME",
+                         "record_value": _abs_dot(svc_fqdn), "ttl": 300})
+        records.append({"fqdn": f"_radioepg._tcp.{svc_fqdn}", "record_type": "SRV",
+                         "record_value": f"0 100 80 {_abs_dot(epg_host)}", "ttl": 300})
+        records.append({"fqdn": f"_radiospi._tcp.{svc_fqdn}", "record_type": "SRV",
+                         "record_value": f"0 100 80 {_abs_dot(spi_host)}", "ttl": 300})
+
+    elif band == "DAB":
+        if not dab_eid or not dab_sid or not dab_gcc:
+            return jsonify({"error": "eid, sid, and gcc_dab are required for DAB band"}), 400
+        if not _re.match(r'^[0-9a-f]{4}$', dab_eid):
+            return jsonify({"error": "eid must be 4 hex chars"}), 400
+        if not _re.match(r'^[0-9a-f]{4,8}$', dab_sid):
+            return jsonify({"error": "sid must be 4 or 8 hex chars"}), 400
+        if not _re.match(r'^[0-9a-f]{3}$', dab_gcc):
+            return jsonify({"error": "gcc_dab must be 3 hex chars"}), 400
+        if not _re.match(r'^[0-9a-f]{1,3}$', dab_scids):
+            return jsonify({"error": "scids must be 1 or 3 hex chars"}), 400
+
+        bearer_fqdn = f"{dab_scids}.{dab_sid}.{dab_eid}.{dab_gcc}.dab.radiodns.org"
+        managed_fqdn = f"{dab_scids}.{dab_sid}.{dab_eid}.{dab_gcc}.dab.{zone}"
+        records.append({"fqdn": managed_fqdn, "record_type": "CNAME",
+                         "record_value": _abs_dot(svc_fqdn), "ttl": 300})
+        records.append({"fqdn": f"_radioepg._tcp.{svc_fqdn}", "record_type": "SRV",
+                         "record_value": f"0 100 80 {_abs_dot(epg_host)}", "ttl": 300})
+        records.append({"fqdn": f"_radiospi._tcp.{svc_fqdn}", "record_type": "SRV",
+                         "record_value": f"0 100 80 {_abs_dot(spi_host)}", "ttl": 300})
+
     else:
-        # Non-FM: SRV records only under svc_fqdn
-        records.append({
-            "fqdn": f"_radioepg._tcp.{svc_fqdn}",
-            "record_type": "SRV",
-            "record_value": f"0 100 80 {_abs_dot(epg_host)}",
-            "ttl": 300,
-        })
-        records.append({
-            "fqdn": f"_radiospi._tcp.{svc_fqdn}",
-            "record_type": "SRV",
-            "record_value": f"0 100 80 {_abs_dot(spi_host)}",
-            "ttl": 300,
-        })
+        # AM (DRM/AMSS) and STREAMING: SRV records only, no bearer CNAME
+        records.append({"fqdn": f"_radioepg._tcp.{svc_fqdn}", "record_type": "SRV",
+                         "record_value": f"0 100 80 {_abs_dot(epg_host)}", "ttl": 300})
+        records.append({"fqdn": f"_radiospi._tcp.{svc_fqdn}", "record_type": "SRV",
+                         "record_value": f"0 100 80 {_abs_dot(spi_host)}", "ttl": 300})
 
     _ensure_db()
     with connect(_cfg_db()) as conn:
@@ -1323,6 +1347,7 @@ def create_station():
 
     station["records"] = rec_rows
     station["bearer_fqdn"] = bearer_fqdn
+    station["country_bearer_fqdn"] = country_bearer_fqdn
     station["managed_fqdn"] = managed_fqdn
     station["svc_fqdn"] = svc_fqdn
     station["epg_srv_fqdn"] = f"_radioepg._tcp.{svc_fqdn}"
