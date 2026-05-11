@@ -919,9 +919,124 @@ def _check_bearer_dns(bearer_fqdn: str, managed_zone: str) -> dict:
 
 _RADIO_BROWSER_HOST = "de1.api.radio-browser.info"
 
+# Matches FM bearer FQDNs: freq5.pi.gcc.fm.radiodns.org or freq5.pi.gcc.fm.<zone>
+import re as _re
+_BEARER_FQDN_RE = _re.compile(
+    r'^(\d{5})\.([0-9a-f]{4})\.([0-9a-f]{3})\.fm\.',
+    _re.IGNORECASE,
+)
+
+
+def _parse_bearer_fqdn(fqdn: str) -> dict | None:
+    """Extract freq5, pi, ecc, gcc from a RadioDNS FM bearer FQDN.
+
+    Works with both public (fm.radiodns.org) and managed zone FQDNs.
+    Returns None if the FQDN doesn't match the expected format.
+    """
+    m = _BEARER_FQDN_RE.match(fqdn.strip().lower().rstrip("."))
+    if not m:
+        return None
+    freq5, pi, gcc = m.group(1), m.group(2), m.group(3)
+    ecc = gcc[1:]   # gcc = pi[0] + ecc, so ecc = gcc minus first char
+    freq_mhz = int(freq5) / 100
+    return {
+        "freq5": freq5,
+        "pi_code": pi,
+        "ecc": ecc,
+        "gcc": gcc,
+        "frequency": f"{freq_mhz:.1f}",
+        "band": "FM",
+        "bearer_fqdn": fqdn.strip(),
+    }
+
+
+def _lookup_from_db(callsign: str) -> list:
+    """Search the local discovery DB for stations matching callsign.
+
+    Searches the `stations` table (short/medium/long name) and joins with
+    cname_hits + candidate_domains to recover freq5, pi, ecc. Returns a list
+    of candidate dicts in the same shape as _radio_browser_lookup results.
+    """
+    results = []
+    try:
+        _ensure_db()
+        cs = callsign.strip().upper()
+        pattern = f"%{cs}%"
+        with connect(_cfg_db()) as conn:
+            # First try stations table (populated after parse-si step)
+            rows = conn.execute(
+                """SELECT s.short_name, s.medium_name, s.long_name,
+                          s.radiodns_fqdn, s.service_identifier
+                   FROM stations s
+                   WHERE UPPER(s.short_name) LIKE ?
+                      OR UPPER(s.medium_name) LIKE ?
+                      OR UPPER(s.long_name) LIKE ?
+                   LIMIT 10""",
+                (pattern, pattern, pattern),
+            ).fetchall()
+            for row in rows:
+                row = dict(row)
+                entry = {
+                    "name": row.get("medium_name") or row.get("short_name") or cs,
+                    "callsign": cs,
+                    "source": "ztr-db",
+                    "service_identifier": row.get("service_identifier") or "",
+                }
+                # Parse freq/pi/ecc from radiodns_fqdn if available
+                fqdn = row.get("radiodns_fqdn") or ""
+                parsed = _parse_bearer_fqdn(fqdn) if fqdn else None
+                if parsed:
+                    entry.update(parsed)
+                else:
+                    entry.update({"frequency": None, "pi_code": None, "ecc": None, "band": "FM"})
+                results.append(entry)
+
+            # Also search cname_hits if no station records
+            if not results:
+                hits = conn.execute(
+                    """SELECT queried_domain, broadcaster_fqdn
+                       FROM cname_hits LIMIT 200""",
+                ).fetchall()
+                for hit in hits:
+                    qd = (hit[0] or "").lower()
+                    parsed = _parse_bearer_fqdn(qd)
+                    if parsed:
+                        # cname_hits doesn't have callsign; include as generic discovery hit
+                        results.append({
+                            "name": qd,
+                            "callsign": cs,
+                            "broadcaster_fqdn": hit[1] or "",
+                            "source": "ztr-cname-scan",
+                            **parsed,
+                        })
+                # Limit generic hits — not a great match without callsign
+                results = results[:3]
+
+            # Also try candidate_domains which always has freq/pi/ecc
+            if not results:
+                cands = conn.execute(
+                    "SELECT domain, freq, pi, ecc, gcc FROM candidate_domains LIMIT 5"
+                ).fetchall()
+                for c in cands:
+                    c = dict(c)
+                    results.append({
+                        "name": c.get("domain", ""),
+                        "callsign": cs,
+                        "frequency": f"{int(c['freq'])/100:.1f}" if c.get("freq") else None,
+                        "freq5": f"{int(c['freq']):05d}" if c.get("freq") else None,
+                        "pi_code": c.get("pi"),
+                        "ecc": c.get("ecc"),
+                        "gcc": c.get("gcc"),
+                        "band": "FM",
+                        "source": "ztr-candidates",
+                    })
+    except Exception:
+        pass
+    return results
+
+
 def _radio_browser_lookup(callsign: str, band: str = "FM") -> list:
     """Search Radio Browser API by callsign. Returns list of candidate dicts."""
-    import re as _re
     import requests as _req
 
     url = f"https://{_RADIO_BROWSER_HOST}/json/stations/search"
@@ -930,27 +1045,23 @@ def _radio_browser_lookup(callsign: str, band: str = "FM") -> list:
                      headers={"User-Agent": "ZeroTrustRadio/1.0"},
                      timeout=8)
         r.raise_for_status()
-        stations = r.json()
-    except Exception as e:
+        rb_stations = r.json()
+    except Exception:
         return []
 
     cs_upper = callsign.strip().upper()
     results = []
-    for s in stations:
+    for s in rb_stations:
         name = (s.get("name") or "").strip()
-        # Must contain the callsign as a word
         if cs_upper not in name.upper():
             continue
 
         # Try to parse frequency from name like "88.5 KQED" or "KQED 88.5"
         freq_match = _re.search(r'\b(\d{2,3}(?:\.\d{1,2})?)\s*(?:MHz|FM|AM)?\b', name, _re.I)
         frequency = freq_match.group(1) if freq_match else None
-
-        # Infer band from name
         inferred_band = "AM" if "AM" in name.upper() else "FM"
 
         results.append({
-            "stationuuid": s.get("stationuuid"),
             "name": name,
             "callsign": cs_upper,
             "frequency": frequency,
@@ -960,33 +1071,66 @@ def _radio_browser_lookup(callsign: str, band: str = "FM") -> list:
             "countrycode": s.get("countrycode") or "",
             "country": s.get("country") or "",
             "state": s.get("state") or "",
-            "language": s.get("language") or "",
             "tags": s.get("tags") or "",
             "stream_url": s.get("url_resolved") or s.get("url") or "",
             "source": "radio-browser",
         })
 
-    # Put exact callsign matches first
     results.sort(key=lambda x: (0 if x["name"].upper().startswith(cs_upper) else 1))
     return results[:5]
 
 
 @bp.get("/lookup")
 def station_lookup():
-    """Look up station details from Radio Browser by callsign.
+    """Look up station details by callsign or bearer FQDN.
 
-    Query params: callsign, band (optional)
+    Query params:
+      callsign  — search by callsign (Radio Browser + ZTR pipeline DB)
+      fqdn      — parse a RadioDNS FM bearer FQDN directly (returns freq5/pi/ecc)
+      band      — FM (default) or AM
+
     Returns list of matching station candidates with auto-fillable fields.
+    PI code and ECC are included when found in the ZTR discovery DB or
+    when parsed directly from a bearer FQDN.
     """
+    fqdn = (request.args.get("fqdn") or "").strip()
+    if fqdn:
+        parsed = _parse_bearer_fqdn(fqdn)
+        if not parsed:
+            return jsonify({"error": f"could not parse bearer FQDN: {fqdn!r}"}), 400
+        return jsonify({"fqdn": fqdn, "results": [{"name": fqdn, "callsign": "", "source": "fqdn-parse", **parsed}]})
+
     callsign = (request.args.get("callsign") or "").strip()
     band = (request.args.get("band") or "FM").strip().upper()
     if not callsign:
-        return jsonify({"error": "callsign is required"}), 400
+        return jsonify({"error": "callsign or fqdn is required"}), 400
     if len(callsign) > 20:
         return jsonify({"error": "callsign too long"}), 400
 
-    results = _radio_browser_lookup(callsign, band)
-    return jsonify({"callsign": callsign, "results": results, "source": "radio-browser"})
+    # ZTR pipeline DB first (has PI + ECC when scanned), then Radio Browser
+    results = _lookup_from_db(callsign)
+    rb_results = _radio_browser_lookup(callsign, band)
+
+    # Merge: enrich DB results with Radio Browser metadata (homepage, favicon, etc.)
+    # and append any Radio Browser-only results not already covered
+    db_callsigns = {r.get("callsign", "").upper() for r in results}
+    for rb in rb_results:
+        matched = False
+        for db in results:
+            if not db.get("homepage") and rb.get("homepage"):
+                db["homepage"] = rb["homepage"]
+                db["favicon"] = rb.get("favicon", "")
+                db["countrycode"] = rb.get("countrycode", "")
+                db["country"] = rb.get("country", "")
+                db["state"] = rb.get("state", "")
+                db["tags"] = rb.get("tags", "")
+                db["stream_url"] = rb.get("stream_url", "")
+                matched = True
+                break
+        if not matched:
+            results.append(rb)
+
+    return jsonify({"callsign": callsign, "results": results[:8]})
 
 
 @bp.get("/onboard")
