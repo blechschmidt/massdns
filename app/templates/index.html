@@ -34,7 +34,29 @@
         <span class="platform-label">PLATFORM</span>
         <span class="platform-desc">Station registration · SPI metadata · PowerDNS provisioning · DO Spaces CDN</span>
       </div>
-      <a href="/service" class="platform-cta">▶ LAUNCH HYBRID RADIO INFRASTRUCTURE</a>
+      <a href="/service/info" class="platform-cta">▶ LAUNCH HYBRID RADIO INFRASTRUCTURE</a>
+    </div>
+
+    <!-- System status panel -->
+    <div class="status-panel">
+      <div class="status-row">
+        <span class="status-item {% if status.api %}ok{% else %}down{% endif %}">
+          <span class="status-dot"></span> API {{ 'ONLINE' if status.api else 'DOWN' }}
+        </span>
+        <span class="status-item {% if status.massdns %}ok{% else %}warn{% endif %}">
+          <span class="status-dot"></span> massdns {{ 'READY' if status.massdns else 'NOT FOUND' }}
+        </span>
+        <span class="status-item {% if status.db %}ok{% else %}warn{% endif %}">
+          <span class="status-dot"></span> DB {{ 'CONNECTED' if status.db else 'UNAVAILABLE' }}
+        </span>
+        <span class="status-item ok">
+          <span class="status-dot"></span> {{ status.candidate_count }} candidates
+        </span>
+      </div>
+      <div class="status-row status-meta">
+        <span>◈ RadioDNS namespace: <code>{{ status.rdns_namespace }}</code></span>
+        <span>◈ SPI endpoint: <code>{{ status.spi_endpoint }}</code></span>
+      </div>
     </div>
 
     <nav class="tabs" id="tabs">

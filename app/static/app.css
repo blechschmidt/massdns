@@ -854,3 +854,27 @@ footer .copy {
   background: linear-gradient(135deg, rgba(255,42,252,0.5), rgba(123,0,255,0.6));
   box-shadow: 0 0 20px rgba(255,42,252,0.3);
 }
+
+/* ── Status panel ─────────────────────────────────────────────────────── */
+.status-panel {
+  margin: 0 0 1.2rem;
+  padding: 10px 16px;
+  background: rgba(10,5,30,0.7);
+  border: 1px solid rgba(0,255,240,0.15);
+  border-radius: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.status-row {
+  display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+  font-family: var(--mono); font-size: 0.72rem;
+}
+.status-meta { color: var(--muted); font-size: 0.68rem; }
+.status-meta code { color: var(--cyan); font-family: var(--mono); }
+.status-item { display: flex; align-items: center; gap: 5px; letter-spacing: 0.06em; }
+.status-item.ok   { color: #39ff85; }
+.status-item.warn { color: var(--yellow, #f5c400); }
+.status-item.down { color: var(--pink); }
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+  background: currentColor; box-shadow: 0 0 6px currentColor;
+}

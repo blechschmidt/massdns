@@ -6,7 +6,7 @@ import sys
 import tempfile
 import traceback
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 
 # Make the radiodns_mapper package importable when this app is run from /app
 # in the container (where the package lives at /app/radiodns_mapper) or from
@@ -159,11 +159,38 @@ def index():
     wants_json = "application/json" in accept and "text/html" not in accept
     if wants_json:
         return _api_info()
+
+    # Build live status for the homepage panel
+    status = _live_status()
     return render_template(
         "index.html",
         max_domains=MAX_DOMAINS,
         allowed_types=sorted(ALLOWED_TYPES),
+        status=status,
     )
+
+
+def _live_status():
+    """Collect lightweight platform status for the homepage panel."""
+    import sqlite3 as _sqlite3
+    db_ok = False
+    candidate_count = 0
+    try:
+        conn = _sqlite3.connect(RADIODNS_DB, timeout=2)
+        row = conn.execute("SELECT COUNT(*) FROM candidate_domains").fetchone()
+        candidate_count = row[0] if row else 0
+        conn.close()
+        db_ok = True
+    except Exception:
+        pass
+    return {
+        "api": True,
+        "massdns": os.path.exists(MASSDNS_BIN),
+        "db": db_ok,
+        "candidate_count": candidate_count,
+        "rdns_namespace": "radiodns.zerotrustradio.org",
+        "spi_endpoint": "https://epg.zerotrustradio.org/radiodns/spi/3.1/SI.xml",
+    }
 
 
 @app.get("/api")
@@ -177,9 +204,17 @@ def _api_info():
         "endpoints": {
             "GET /": "web UI",
             "GET /api": "this info",
+            "GET /health": "liveness (alias)",
             "GET /healthz": "liveness",
+            "GET /routes": "list all registered routes",
             "POST /resolve": "resolve domains, streams ndjson",
-            "GET /rdns/info": "radiodns_mapper pipeline endpoints",
+            "GET /rdns/info": "radiodns_mapper pipeline info",
+            "GET /rdns/db/summary": "pipeline DB row counts",
+            "GET /rdns/db/candidate_domains": "list candidate domains",
+            "GET /service/info": "alias → /rdns/info",
+            "GET /service/stations": "alias → /rdns/db/candidate_domains",
+            "GET /service/status": "alias → /rdns/db/summary",
+            "POST /service/register": "RadioDNS station registration",
         },
         "usage": {
             "content_types": ["application/json", "text/plain"],
@@ -191,6 +226,7 @@ def _api_info():
     })
 
 
+@app.get("/health")
 @app.get("/healthz")
 def healthz():
     if not os.path.exists(MASSDNS_BIN):
@@ -198,6 +234,61 @@ def healthz():
     if not os.path.exists(RESOLVERS):
         return jsonify({"status": "down", "reason": "resolvers file missing"}), 503
     return jsonify({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+# /routes — debug endpoint listing every registered route
+# ---------------------------------------------------------------------------
+@app.get("/routes")
+def list_routes():
+    routes = []
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+        routes.append({
+            "path": rule.rule,
+            "methods": sorted(m for m in rule.methods if m not in ("HEAD", "OPTIONS")),
+            "endpoint": rule.endpoint,
+        })
+    return jsonify(routes)
+
+
+# ---------------------------------------------------------------------------
+# /service/* aliases — all requests served by this (Python) app so they work
+# regardless of whether the Node.js radio-service component is deployed.
+# ---------------------------------------------------------------------------
+@app.get("/service/info")
+def service_info():
+    return redirect(url_for("rdns.info"))
+
+
+@app.get("/service/stations")
+def service_stations():
+    limit = request.args.get("limit", "200")
+    return redirect(f"/rdns/db/candidate_domains?limit={limit}")
+
+
+@app.get("/service/status")
+def service_status():
+    return redirect(url_for("rdns.db_summary"))
+
+
+@app.post("/service/register")
+def service_register():
+    """Station registration. Delegates to rdns blueprint if available."""
+    try:
+        from app.pdns import pdns_status  # noqa: F401
+        # Full registration not yet wired into the Python layer;
+        # return 501 with a clear message rather than 404.
+    except Exception:
+        pass
+    return jsonify({
+        "error": "not_implemented",
+        "message": "Station registration requires the radio-service component. "
+                   "Use POST /rdns/generate to seed candidate domains instead.",
+        "alternatives": {
+            "seed_pipeline": "POST /rdns/generate",
+            "info": "GET /rdns/info",
+        },
+    }), 501
 
 
 def _parse_domains():
@@ -300,6 +391,17 @@ def resolve():
         "X-Massdns-Cmd": shlex.join(cmd),
     }
     return Response(generate(), mimetype="application/x-ndjson", headers=headers)
+
+
+def _log_routes():
+    print("[startup] registered routes:", file=sys.stderr, flush=True)
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+        methods = ",".join(sorted(m for m in rule.methods if m not in ("HEAD", "OPTIONS")))
+        print(f"[startup]   {methods:20s}  {rule.rule}", file=sys.stderr, flush=True)
+
+
+with app.app_context():
+    _log_routes()
 
 
 if __name__ == "__main__":
