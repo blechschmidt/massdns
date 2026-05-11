@@ -28,10 +28,68 @@ from radiodns_mapper.storage import (
 from radiodns_mapper.utils import normalize_domain
 
 
-bp = Blueprint("rdns", __name__, url_prefix="/rdns")
+bp = Blueprint("rdns", __name__, url_prefix="/rdns",
+               template_folder=os.path.join(os.path.dirname(__file__), "templates"))
 
+
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(__file__))
+import pdns as _pdns
 
 SRV_DEFAULT_SERVICES = ("_radioepg._tcp", "_radiovis._tcp")
+
+# ---------------------------------------------------------------------------
+# Onboarding schema – additional tables not in storage.py
+# ---------------------------------------------------------------------------
+_ONBOARD_TABLES = [
+    """CREATE TABLE IF NOT EXISTS registered_stations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    callsign TEXT NOT NULL,
+    band TEXT NOT NULL DEFAULT 'FM',
+    frequency TEXT NOT NULL,
+    freq5 TEXT,
+    pi_code TEXT,
+    ecc TEXT,
+    gcc TEXT,
+    fqdn TEXT,
+    svc_fqdn TEXT,
+    epg_host TEXT,
+    spi_host TEXT,
+    website TEXT,
+    contact_email TEXT,
+    provider_name TEXT,
+    pdns_applied INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+)""",
+    """CREATE TABLE IF NOT EXISTS radiodns_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id INTEGER NOT NULL REFERENCES registered_stations(id),
+    fqdn TEXT NOT NULL,
+    record_type TEXT NOT NULL,
+    record_value TEXT NOT NULL,
+    ttl INTEGER DEFAULT 300,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+)""",
+    """CREATE TABLE IF NOT EXISTS dns_change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id INTEGER,
+    action TEXT NOT NULL,
+    fqdn TEXT,
+    record_type TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    pdns_response TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+)""",
+]
+
+
+def _init_onboard_schema(conn) -> None:
+    for stmt in _ONBOARD_TABLES:
+        conn.execute(stmt)
 ALLOWED_TABLES = {
     "candidate_domains", "cname_hits", "srv_records",
     "si_documents", "stations", "bearers", "media",
@@ -74,6 +132,7 @@ def _ensure_db():
     sqlite) so we don't duplicate it here."""
     with connect(_cfg_db()) as conn:
         init_schema(conn)
+        _init_onboard_schema(conn)
 
 
 # --- seed --------------------------------------------------------------
@@ -725,6 +784,428 @@ def db_reset():
     return jsonify({"ok": True, "db": db})
 
 
+# ---------------------------------------------------------------------------
+# Station Onboarding Endpoints
+# ---------------------------------------------------------------------------
+
+_PDNS_ZONE = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
+
+
+def _check_admin(req):
+    """Return (ok, response_or_None). If ADMIN_KEY not set, always ok."""
+    admin_key = os.environ.get("ADMIN_KEY", "")
+    if not admin_key:
+        return True, None
+    provided = (req.headers.get("X-Admin-Key") or
+                (req.get_json(silent=True) or {}).get("admin_key", ""))
+    if provided != admin_key:
+        return False, (jsonify({"error": "forbidden"}), 403)
+    return True, None
+
+
+def _abs_dot(name: str) -> str:
+    """Ensure trailing dot."""
+    return name.strip().rstrip(".") + "."
+
+
+def _validate_zone(fqdn: str, zone: str) -> bool:
+    """Return True if fqdn is within the given zone."""
+    f = fqdn.rstrip(".").lower()
+    z = zone.rstrip(".").lower()
+    return f == z or f.endswith("." + z)
+
+
+@bp.get("/onboard")
+def onboard_ui():
+    from flask import render_template
+    zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
+    return render_template(
+        "onboard.html",
+        pdns_zone=zone,
+        epg_default=os.environ.get("EPG_HOST", "epg.zerotrustradio.org"),
+        spi_default=os.environ.get("SPI_HOST", os.environ.get("EPG_HOST", "epg.zerotrustradio.org")),
+    )
+
+
+@bp.post("/stations")
+def create_station():
+    ok, err = _check_admin(request)
+    if not ok:
+        return err
+
+    body = request.get_json(silent=True) or {}
+    callsign = (body.get("callsign") or "").strip()
+    band = (body.get("band") or "FM").strip().upper()
+    frequency = (body.get("frequency") or "").strip()
+
+    if not callsign:
+        return jsonify({"error": "callsign is required"}), 400
+    if not frequency:
+        return jsonify({"error": "frequency is required"}), 400
+    if band not in ("FM", "AM", "HD", "STREAMING"):
+        return jsonify({"error": f"unsupported band: {band}"}), 400
+
+    callsign_clean = callsign.lower().replace(" ", "-")
+    # Only allow alphanumeric + hyphen in callsign for DNS safety
+    import re as _re
+    callsign_clean = _re.sub(r"[^a-z0-9\-]", "", callsign_clean)
+    if not callsign_clean:
+        return jsonify({"error": "callsign produces empty DNS label after cleaning"}), 400
+
+    pi_code = (body.get("pi_code") or "").strip().lower()
+    ecc = (body.get("ecc") or "").strip().lower()
+    epg_host = (body.get("epg_host") or os.environ.get("EPG_HOST", "epg.zerotrustradio.org")).strip()
+    spi_host = (body.get("spi_host") or os.environ.get("SPI_HOST", epg_host)).strip()
+    website = (body.get("website") or "").strip()
+    contact_email = (body.get("contact_email") or "").strip()
+    provider_name = (body.get("provider_name") or "").strip()
+
+    zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
+
+    freq5 = None
+    gcc = None
+    fqdn = None
+    svc_fqdn = f"{callsign_clean}.svc.{zone}"
+    records = []
+
+    if band == "FM":
+        if not pi_code:
+            return jsonify({"error": "pi_code is required for FM band"}), 400
+        if not ecc:
+            return jsonify({"error": "ecc is required for FM band"}), 400
+        try:
+            from radiodns_mapper.generator import (
+                parse_freq, build_fqdn as _build_fqdn, build_gcc,
+                normalize_pi, normalize_ecc,
+            )
+            pi_norm = normalize_pi(pi_code)
+            ecc_norm = normalize_ecc(ecc)
+            freq_int = parse_freq(frequency)
+            freq5 = f"{freq_int:05d}"
+            gcc = build_gcc(pi_norm, ecc_norm)
+            # Our zone variant: replace fm.radiodns.org suffix with fm.<zone>
+            fqdn = f"{freq5}.{pi_norm}.{gcc}.fm.{zone}"
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+        if not _validate_zone(fqdn, zone):
+            return jsonify({"error": f"generated FQDN is outside zone {zone}"}), 400
+
+        # CNAME record
+        records.append({
+            "fqdn": fqdn,
+            "record_type": "CNAME",
+            "record_value": _abs_dot(svc_fqdn),
+            "ttl": 300,
+        })
+        # EPG SRV record
+        epg_srv_name = f"_radioepg._tcp.{svc_fqdn}"
+        records.append({
+            "fqdn": epg_srv_name,
+            "record_type": "SRV",
+            "record_value": f"0 100 80 {_abs_dot(epg_host)}",
+            "ttl": 300,
+        })
+        # SPI SRV record
+        spi_srv_name = f"_radiospi._tcp.{svc_fqdn}"
+        records.append({
+            "fqdn": spi_srv_name,
+            "record_type": "SRV",
+            "record_value": f"0 100 80 {_abs_dot(spi_host)}",
+            "ttl": 300,
+        })
+    else:
+        # Non-FM: just create SRV records under svc_fqdn
+        epg_srv_name = f"_radioepg._tcp.{svc_fqdn}"
+        records.append({
+            "fqdn": epg_srv_name,
+            "record_type": "SRV",
+            "record_value": f"0 100 80 {_abs_dot(epg_host)}",
+            "ttl": 300,
+        })
+        spi_srv_name = f"_radiospi._tcp.{svc_fqdn}"
+        records.append({
+            "fqdn": spi_srv_name,
+            "record_type": "SRV",
+            "record_value": f"0 100 80 {_abs_dot(spi_host)}",
+            "ttl": 300,
+        })
+
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        cur = conn.execute(
+            """INSERT INTO registered_stations
+               (callsign, band, frequency, freq5, pi_code, ecc, gcc, fqdn, svc_fqdn,
+                epg_host, spi_host, website, contact_email, provider_name)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (callsign, band, frequency, freq5, pi_code or None, ecc or None,
+             gcc, fqdn, svc_fqdn, epg_host, spi_host, website or None,
+             contact_email or None, provider_name or None),
+        )
+        station_id = cur.lastrowid
+        rec_rows = []
+        for rec in records:
+            rc = conn.execute(
+                """INSERT INTO radiodns_records
+                   (station_id, fqdn, record_type, record_value, ttl, status)
+                   VALUES (?,?,?,?,?,?)""",
+                (station_id, rec["fqdn"], rec["record_type"],
+                 rec["record_value"], rec["ttl"], "pending"),
+            )
+            rec["id"] = rc.lastrowid
+            rec["station_id"] = station_id
+            rec["status"] = "pending"
+            rec_rows.append(rec)
+        station = dict(conn.execute(
+            "SELECT * FROM registered_stations WHERE id=?", (station_id,)
+        ).fetchone())
+
+    station["records"] = rec_rows
+    return jsonify(station), 201
+
+
+@bp.get("/stations")
+def list_stations():
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        rows = conn.execute(
+            """SELECT s.*,
+                      COUNT(r.id) AS record_count,
+                      SUM(CASE WHEN r.status='applied' THEN 1 ELSE 0 END) AS applied_count
+               FROM registered_stations s
+               LEFT JOIN radiodns_records r ON r.station_id = s.id
+               GROUP BY s.id
+               ORDER BY s.created_at DESC"""
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.get("/stations/<int:station_id>")
+def get_station(station_id):
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        row = conn.execute(
+            "SELECT * FROM registered_stations WHERE id=?", (station_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "station not found"}), 404
+        records = conn.execute(
+            "SELECT * FROM radiodns_records WHERE station_id=? ORDER BY id",
+            (station_id,)
+        ).fetchall()
+    station = dict(row)
+    station["records"] = [dict(r) for r in records]
+    return jsonify(station)
+
+
+@bp.post("/stations/<int:station_id>/pdns/apply")
+def station_pdns_apply(station_id):
+    ok, err = _check_admin(request)
+    if not ok:
+        return err
+
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        station = conn.execute(
+            "SELECT * FROM registered_stations WHERE id=?", (station_id,)
+        ).fetchone()
+        if not station:
+            return jsonify({"error": "station not found"}), 404
+        records = conn.execute(
+            "SELECT * FROM radiodns_records WHERE station_id=? AND status!='deleted'",
+            (station_id,)
+        ).fetchall()
+
+    results = []
+    for rec in records:
+        rec = dict(rec)
+        try:
+            _pdns.upsert_record(
+                name=rec["fqdn"],
+                rtype=rec["record_type"],
+                records=[rec["record_value"]],
+                ttl=rec["ttl"],
+            )
+            status = "applied"
+            pdns_resp = "ok"
+        except Exception as e:
+            status = "error"
+            pdns_resp = str(e)
+
+        with connect(_cfg_db()) as conn:
+            conn.execute(
+                "UPDATE radiodns_records SET status=?, updated_at=datetime('now') WHERE id=?",
+                (status, rec["id"]),
+            )
+            conn.execute(
+                """INSERT INTO dns_change_log
+                   (station_id, action, fqdn, record_type, new_value, pdns_response)
+                   VALUES (?,?,?,?,?,?)""",
+                (station_id, "apply", rec["fqdn"], rec["record_type"],
+                 rec["record_value"], pdns_resp),
+            )
+        results.append({
+            "record_id": rec["id"],
+            "fqdn": rec["fqdn"],
+            "record_type": rec["record_type"],
+            "status": status,
+            "pdns_response": pdns_resp,
+        })
+
+    # Mark station as applied if all records succeeded
+    all_ok = all(r["status"] == "applied" for r in results)
+    if all_ok:
+        with connect(_cfg_db()) as conn:
+            conn.execute(
+                "UPDATE registered_stations SET pdns_applied=1, updated_at=datetime('now') WHERE id=?",
+                (station_id,),
+            )
+
+    return jsonify({"station_id": station_id, "results": results, "all_applied": all_ok})
+
+
+@bp.post("/stations/<int:station_id>/pdns/verify")
+def station_pdns_verify(station_id):
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        station = conn.execute(
+            "SELECT * FROM registered_stations WHERE id=?", (station_id,)
+        ).fetchone()
+        if not station:
+            return jsonify({"error": "station not found"}), 404
+        records = conn.execute(
+            "SELECT * FROM radiodns_records WHERE station_id=? AND status!='deleted'",
+            (station_id,)
+        ).fetchall()
+
+    try:
+        rrsets = _pdns.zone_rrsets()
+    except Exception as e:
+        return jsonify({"error": f"could not fetch zone rrsets: {e}"}), 502
+
+    # Index rrsets by (name, type)
+    rrset_index = {}
+    for rs in rrsets:
+        key = (rs.get("name", "").rstrip(".").lower(), rs.get("type", "").upper())
+        rrset_index[key] = rs
+
+    results = []
+    for rec in records:
+        rec = dict(rec)
+        key = (rec["fqdn"].rstrip(".").lower(), rec["record_type"].upper())
+        rs = rrset_index.get(key)
+        if rs:
+            contents = [r["content"] for r in rs.get("records", [])]
+            found = rec["record_value"].rstrip(".") in [c.rstrip(".") for c in contents]
+            results.append({
+                "record_id": rec["id"],
+                "fqdn": rec["fqdn"],
+                "record_type": rec["record_type"],
+                "expected": rec["record_value"],
+                "found_in_pdns": found,
+                "pdns_values": contents,
+            })
+        else:
+            results.append({
+                "record_id": rec["id"],
+                "fqdn": rec["fqdn"],
+                "record_type": rec["record_type"],
+                "expected": rec["record_value"],
+                "found_in_pdns": False,
+                "pdns_values": [],
+            })
+
+    all_ok = all(r["found_in_pdns"] for r in results)
+    return jsonify({"station_id": station_id, "results": results, "all_verified": all_ok})
+
+
+@bp.delete("/stations/<int:station_id>/records/<int:record_id>")
+def delete_station_record(station_id, record_id):
+    ok, err = _check_admin(request)
+    if not ok:
+        return err
+
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        rec = conn.execute(
+            "SELECT * FROM radiodns_records WHERE id=? AND station_id=?",
+            (record_id, station_id)
+        ).fetchone()
+        if not rec:
+            return jsonify({"error": "record not found"}), 404
+        rec = dict(rec)
+
+    pdns_resp = None
+    pdns_ok = None
+    try:
+        _pdns.delete_rrset(rec["fqdn"], rec["record_type"])
+        pdns_ok = True
+        pdns_resp = "deleted"
+    except Exception as e:
+        pdns_ok = False
+        pdns_resp = str(e)
+
+    with connect(_cfg_db()) as conn:
+        conn.execute(
+            "UPDATE radiodns_records SET status='deleted', updated_at=datetime('now') WHERE id=?",
+            (record_id,),
+        )
+        conn.execute(
+            """INSERT INTO dns_change_log
+               (station_id, action, fqdn, record_type, old_value, pdns_response)
+               VALUES (?,?,?,?,?,?)""",
+            (station_id, "delete", rec["fqdn"], rec["record_type"],
+             rec["record_value"], pdns_resp),
+        )
+
+    return jsonify({
+        "record_id": record_id,
+        "station_id": station_id,
+        "status": "deleted",
+        "pdns_deleted": pdns_ok,
+        "pdns_response": pdns_resp,
+    })
+
+
+@bp.get("/stations/<int:station_id>/zonefile")
+def station_zonefile(station_id):
+    _ensure_db()
+    with connect(_cfg_db()) as conn:
+        station = conn.execute(
+            "SELECT * FROM registered_stations WHERE id=?", (station_id,)
+        ).fetchone()
+        if not station:
+            return jsonify({"error": "station not found"}), 404
+        records = conn.execute(
+            "SELECT * FROM radiodns_records WHERE station_id=? AND status!='deleted' ORDER BY id",
+            (station_id,)
+        ).fetchall()
+
+    station = dict(station)
+    lines = [
+        f"; RadioDNS zonefile snippet for {station['callsign']} ({station['band']})",
+        f"; Generated by Zero Trust Radio onboarding · station_id={station_id}",
+        f"; Zone: {os.environ.get('PDNS_ZONE', 'radiodns.zerotrustradio.org')}",
+        "",
+    ]
+    for rec in records:
+        rec = dict(rec)
+        fqdn = _abs_dot(rec["fqdn"])
+        ttl = rec["ttl"]
+        rtype = rec["record_type"]
+        rvalue = rec["record_value"]
+        lines.append(f"{fqdn}\t{ttl}\tIN\t{rtype}\t{rvalue}")
+
+    zonefile_text = "\n".join(lines) + "\n"
+    return Response(
+        zonefile_text,
+        mimetype="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="station_{station_id}.zone"'
+        },
+    )
+
+
 # --- info -----------------------------------------------------------------
 
 @bp.get("/info")
@@ -742,7 +1223,15 @@ def info():
             "POST /rdns/scan-srv":             "massdns SRV sweep",
             "POST /rdns/fetch-si":             "fetch SI.xml from radioepg targets",
             "POST /rdns/parse-si":             "parse stored SI.xml into stations",
-            "POST /rdns/expand-hits":          "PI/freq sweep around confirmed hits",
+            "POST /rdns/expand-hits":              "PI/freq sweep around confirmed hits",
+            "GET  /rdns/onboard":                  "station onboarding UI",
+            "POST /rdns/stations":                 "register a new station",
+            "GET  /rdns/stations":                 "list all registered stations",
+            "GET  /rdns/stations/<id>":            "get station with records",
+            "POST /rdns/stations/<id>/pdns/apply": "apply records to PowerDNS",
+            "POST /rdns/stations/<id>/pdns/verify":"verify records in PowerDNS",
+            "DELETE /rdns/stations/<id>/records/<rid>": "delete a DNS record",
+            "GET  /rdns/stations/<id>/zonefile":   "RFC 1035 zonefile snippet",
             "GET  /rdns/db/summary":           "row counts per table",
             "GET  /rdns/db/<table>":           "rows from a table",
             "GET  /rdns/db/download":          "download the SQLite database",
