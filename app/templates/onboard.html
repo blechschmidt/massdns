@@ -154,6 +154,18 @@
     <section class="panel" id="add-station">
       <h2>◤ REGISTER STATION</h2>
 
+      <!-- Station lookup -->
+      <div class="row" style="margin-bottom:14px">
+        <label class="field grow">
+          <span class="lbl">◢ LOOKUP CALLSIGN <em>// pull details from Radio Browser + FCC</em></span>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="lookup-callsign" placeholder="KQED, WXYZ, NTS1…" autocomplete="off" spellcheck="false" style="flex:1" />
+            <button class="ghost" id="btn-lookup" style="white-space:nowrap">↗ LOOKUP</button>
+          </div>
+        </label>
+      </div>
+      <div id="lookup-results" style="display:none;margin-bottom:18px"></div>
+
       <div class="onboard-grid">
 
         <!-- Callsign -->
