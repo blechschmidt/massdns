@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ＲＡＤＩＯＤＮＳ · DNS as a Service</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Orbitron:wght@500;700;900&family=VT323&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='service.css') }}" />
+</head>
+<body>
+  <div class="bg-sky"></div>
+  <div class="bg-stars"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-scanlines"></div>
+
+  <main>
+    <header>
+      <div class="brand">
+        <img class="logo" src="{{ url_for('static', filename='logo.svg') }}" alt="" />
+        <div class="title">
+          <h1 data-text="ＲＡＤＩＯＤＮＳ">ＲＡＤＩＯＤＮＳ</h1>
+          <p class="tag">▒░ hold   your   call   sign   on   the   air  ░▒</p>
+        </div>
+      </div>
+      <p class="subtag">📡 DNS as a Service · <span id="zone-display">{{ pdns_zone }}</span> · managed records on PowerDNS</p>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="register">◤ register station</button>
+      <button class="tab" data-tab="directory">◤ directory</button>
+      <button class="tab" data-tab="lookup">◤ lookup</button>
+      <a class="tab tab-link" href="/">◤ resolver</a>
+    </nav>
+
+    <!-- ===================== REGISTER TAB ===================== -->
+    <section class="tab-panel active" data-tab="register">
+      <div class="panel">
+        <p class="hint">
+          Register a radio station's call sign. The service generates the RadioDNS FQDN
+          (<code>{freq5}.{pi}.{gcc}.fm.{{ pdns_zone }}</code>) and creates
+          a CNAME record pointing to your broadcaster domain.
+        </p>
+
+        <div class="svc-form" id="reg-form">
+
+          {% if admin_key_required %}
+          <div class="form-row">
+            <label class="field">
+              <span class="lbl">◢ ADMIN KEY</span>
+              <input type="password" id="reg-admin-key" placeholder="••••••••" autocomplete="current-password" />
+            </label>
+          </div>
+          {% endif %}
+
+          <div class="form-section-head">▸ STATION IDENTITY</div>
+          <div class="form-row form-row-3">
+            <label class="field">
+              <span class="lbl">◢ CALL SIGN</span>
+              <input type="text" id="reg-callsign" placeholder="WXYZ" maxlength="10" />
+            </label>
+            <label class="field">
+              <span class="lbl">◢ CONTACT EMAIL <em>(optional)</em></span>
+              <input type="email" id="reg-email" placeholder="engineer@station.com" />
+            </label>
+          </div>
+
+          <div class="form-section-head">▸ FM BEARER PARAMETERS</div>
+          <div class="form-row form-row-3">
+            <label class="field">
+              <span class="lbl">◢ FREQUENCY (MHz)</span>
+              <input type="text" id="reg-freq" placeholder="95.8" />
+            </label>
+            <label class="field">
+              <span class="lbl">◢ PI CODE <em>(4 hex)</em></span>
+              <input type="text" id="reg-pi" placeholder="c479" maxlength="6" />
+            </label>
+            <label class="field">
+              <span class="lbl">◢ ECC <em>(2 hex)</em></span>
+              <input type="text" id="reg-ecc" placeholder="e1" maxlength="4" />
+            </label>
+          </div>
+
+          <!-- Live FQDN preview -->
+          <div class="fqdn-preview" id="fqdn-preview">
+            <span class="fqdn-label">◢ RADIODNS FQDN</span>
+            <code id="fqdn-value">enter frequency, PI, and ECC above</code>
+          </div>
+
+          <div class="form-section-head">▸ DNS TARGET</div>
+          <div class="form-row">
+            <label class="field grow">
+              <span class="lbl">◢ CNAME TARGET <em>(broadcaster domain)</em></span>
+              <input type="text" id="reg-cname" placeholder="broadcaster.example.com" />
+            </label>
+          </div>
+
+          <details class="srv-section">
+            <summary>▸ SRV RECORDS <em>(optional — host RadioEPG / RadioVIS endpoints)</em></summary>
+            <div class="srv-body">
+              <p class="hint">
+                If provided, the service will also create SRV records under
+                <code id="svc-base-preview">{callsign}.svc.{{ pdns_zone }}</code>
+                that EPG clients can auto-discover.
+              </p>
+              <div class="form-section-head">_radioepg._tcp</div>
+              <div class="form-row form-row-3">
+                <label class="field grow">
+                  <span class="lbl">◢ EPG HOST</span>
+                  <input type="text" id="reg-epg-host" placeholder="epg.example.com" />
+                </label>
+                <label class="field">
+                  <span class="lbl">◢ EPG PORT</span>
+                  <input type="number" id="reg-epg-port" placeholder="80" min="1" max="65535" />
+                </label>
+              </div>
+              <div class="form-section-head">_radiovis._tcp <em>(optional)</em></div>
+              <div class="form-row form-row-3">
+                <label class="field grow">
+                  <span class="lbl">◢ VIS HOST</span>
+                  <input type="text" id="reg-vis-host" placeholder="vis.example.com" />
+                </label>
+                <label class="field">
+                  <span class="lbl">◢ VIS PORT</span>
+                  <input type="number" id="reg-vis-port" placeholder="61613" min="1" max="65535" />
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-row">
+            <label class="field grow">
+              <span class="lbl">◢ NOTES <em>(optional)</em></span>
+              <input type="text" id="reg-notes" placeholder="e.g. Heart FM London" />
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button class="primary" id="reg-submit">▶ REGISTER &amp; CREATE DNS RECORD</button>
+            <button class="ghost" id="reg-clear">✕ CLEAR</button>
+            <span class="pill" id="reg-status">idle</span>
+          </div>
+        </div>
+
+        <!-- Result card -->
+        <div class="result-card hidden" id="reg-result"></div>
+      </div>
+    </section>
+
+    <!-- ===================== DIRECTORY TAB ===================== -->
+    <section class="tab-panel" data-tab="directory">
+      <div class="panel">
+        <div class="dir-head">
+          <h2>◤ REGISTERED STATIONS</h2>
+          <button class="primary" id="dir-refresh">↻ refresh</button>
+          <span class="metric"><b id="dir-total">—</b> stations</span>
+          <div class="pdns-status" id="pdns-status-pill"></div>
+        </div>
+        <div id="dir-table-wrap">
+          <p class="hint">Click refresh to load the station directory.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== LOOKUP TAB ===================== -->
+    <section class="tab-panel" data-tab="lookup">
+      <div class="panel">
+        <p class="hint">
+          Enter a frequency + PI + ECC to compute the RadioDNS FQDN for this service,
+          or look up a registered call sign.
+        </p>
+        <div class="form-row form-row-3">
+          <label class="field">
+            <span class="lbl">◢ FREQUENCY (MHz)</span>
+            <input type="text" id="lu-freq" placeholder="95.8" />
+          </label>
+          <label class="field">
+            <span class="lbl">◢ PI CODE</span>
+            <input type="text" id="lu-pi" placeholder="c479" maxlength="6" />
+          </label>
+          <label class="field">
+            <span class="lbl">◢ ECC</span>
+            <input type="text" id="lu-ecc" placeholder="e1" maxlength="4" />
+          </label>
+        </div>
+        <div class="fqdn-preview" id="lu-preview">
+          <span class="fqdn-label">◢ COMPUTED FQDN</span>
+          <code id="lu-fqdn">enter parameters above</code>
+        </div>
+        <div class="form-actions">
+          <button class="primary" id="lu-lookup">▶ LOOK UP IN DIRECTORY</button>
+        </div>
+        <div class="result-card hidden" id="lu-result"></div>
+      </div>
+    </section>
+
+    <footer>
+      <code>POST /service/register</code> · <a href="/service/stations">/service/stations</a> · <a href="/service/status">/service/status</a> · <a href="/service/info">/service/info</a>
+      <div class="copy">▼ ｐｏｗｅｒｅｄ ｂｙ PowerDNS · broadcasting from the cloud horizon ▼</div>
+    </footer>
+  </main>
+
+  <script>
+    window.SVC_CONFIG = {
+      zone: {{ pdns_zone | tojson }},
+      adminKeyRequired: {{ 'true' if admin_key_required else 'false' }},
+    };
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='service.js') }}"></script>
+</body>
+</html>
