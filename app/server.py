@@ -33,27 +33,12 @@ ALLOWED_TYPES = {
     "NSEC", "PTR", "RRSIG", "SOA", "TXT", "CAA", "TLSA", "SRV",
 }
 
-RADIODNS_SERVICE_DB = os.environ.get("RADIODNS_SERVICE_DB") \
-    or os.path.join(RADIODNS_WORK, "service.sqlite")
-
 app.config.update(
     MASSDNS_BIN=MASSDNS_BIN,
     RESOLVERS=RESOLVERS,
     RADIODNS_WORK=RADIODNS_WORK,
     RADIODNS_DB=RADIODNS_DB,
-    RADIODNS_SERVICE_DB=RADIODNS_SERVICE_DB,
 )
-
-# Register the RadioDNS-as-a-Service blueprint (managed PowerDNS records).
-SVC_IMPORT_ERROR = None
-try:
-    from service_routes import bp as svc_bp  # noqa: E402
-    app.register_blueprint(svc_bp)
-    print("[startup] radiodns service blueprint registered", file=sys.stderr, flush=True)
-except Exception as _e:
-    SVC_IMPORT_ERROR = "".join(traceback.format_exception(type(_e), _e, _e.__traceback__))
-    print("[startup] FAILED to load service blueprint (non-fatal):", file=sys.stderr, flush=True)
-    print(SVC_IMPORT_ERROR, file=sys.stderr, flush=True)
 
 # Register the radiodns pipeline blueprint, but never let an import error in
 # that subsystem prevent the basic resolver UI from booting. The traceback is
