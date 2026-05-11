@@ -82,8 +82,8 @@ function validateFreq(band, raw) {
     return { ok: true, freq5: null, freqVal: khz, error: null };
   }
 
-  if (band === 'HD') {
-    return { ok: false, freq5: null, freqVal: null, error: 'HD band is not yet implemented' };
+  if (band === 'DAB') {
+    return { ok: true, freq5: null, freqVal: null, error: null };
   }
 
   return { ok: false, freq5: null, freqVal: null, error: `unsupported band: ${band}` };
@@ -207,10 +207,7 @@ window.fillFromLookup = function(idx) {
   if (s.homepage) { document.getElementById('f-website').value = s.homepage; filled.push('website'); }
 
   if (s.band) {
-    const band = s.band.toUpperCase();
-    document.getElementById('f-band').value = band;
-    document.querySelectorAll('.band-btn').forEach(b => b.classList.toggle('active', b.dataset.band === band));
-    document.querySelectorAll('.fm-only').forEach(el => el.classList.toggle('hidden', band !== 'FM'));
+    applyBand(s.band.toUpperCase());
   }
 
   const hasPi = s.pi_code && s.ecc;
@@ -233,16 +230,49 @@ document.getElementById('lookup-callsign').addEventListener('keydown', e => {
   if (e.key === 'Enter') lookupStation();
 });
 
+function buildDABFQDN(scids, sid, eid, gcc) {
+  scids = (scids || '0').trim().toLowerCase();
+  sid   = (sid || '').trim().toLowerCase();
+  eid   = (eid || '').trim().toLowerCase();
+  gcc   = (gcc || '').trim().toLowerCase();
+  if (!sid || !eid || !gcc) return null;
+  if (!/^[0-9a-f]{4,8}$/.test(sid)) return null;
+  if (!/^[0-9a-f]{4}$/.test(eid))   return null;
+  if (!/^[0-9a-f]{3}$/.test(gcc))   return null;
+  if (!/^[0-9a-f]{1,3}$/.test(scids)) return null;
+  return {
+    bearer:  `${scids}.${sid}.${eid}.${gcc}.dab.radiodns.org`,
+    managed: `${scids}.${sid}.${eid}.${gcc}.dab.${PDNS_ZONE}`,
+  };
+}
+
 // ── Band selector ──────────────────────────────────────────────────────────
+
+function applyBand(band) {
+  document.getElementById('f-band').value = band;
+  document.querySelectorAll('.band-btn').forEach(b => b.classList.toggle('active', b.dataset.band === band));
+  const isFM  = band === 'FM';
+  const isDAB = band === 'DAB';
+  const isAM  = band === 'AM';
+  document.querySelectorAll('.fm-only').forEach(el => {
+    el.classList.toggle('hidden', !isFM);
+    if (el.style !== undefined) el.style.display = isFM ? '' : 'none';
+  });
+  document.querySelectorAll('.dab-only').forEach(el => { el.style.display = isDAB ? '' : 'none'; });
+  document.querySelectorAll('.am-only').forEach(el  => { el.style.display = isAM  ? '' : 'none'; });
+  const amNote  = document.getElementById('band-info-am');
+  const dabNote = document.getElementById('band-info-dab');
+  if (amNote)  amNote.style.display  = isAM  ? 'block' : 'none';
+  if (dabNote) dabNote.style.display = isDAB ? 'block' : 'none';
+  // Frequency placeholder
+  const freqEl = document.getElementById('f-freq');
+  if (freqEl) freqEl.placeholder = isAM ? '9600 (kHz, DRM)' : '106.5';
+}
 
 document.querySelectorAll('.band-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.band-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('f-band').value = btn.dataset.band;
-    const isFM = btn.dataset.band === 'FM';
-    document.querySelectorAll('.fm-only').forEach(el => el.classList.toggle('hidden', !isFM));
     _lastBearerCheck = null;
+    applyBand(btn.dataset.band);
     updatePreview();
   });
 });
@@ -254,6 +284,28 @@ function updatePreview() {
   const band = document.getElementById('f-band').value;
   const cs   = (document.getElementById('f-callsign').value || '').trim();
   const svcFqdn = cs ? buildSvcFQDN(cs) : null;
+
+  if (band === 'DAB') {
+    const eid   = (document.getElementById('f-eid')?.value || '').trim();
+    const sid   = (document.getElementById('f-sid')?.value || '').trim();
+    const scids = (document.getElementById('f-scids')?.value || '0').trim();
+    const gcc   = (document.getElementById('f-gcc-dab')?.value || '').trim();
+    const fqdns = buildDABFQDN(scids, sid, eid, gcc);
+    let html = '';
+    if (fqdns) {
+      html += `<span class="fqdn-dim">bearer  → </span>${escHtml(fqdns.bearer)}<br>`;
+      html += `<span class="fqdn-dim">managed → </span>${escHtml(fqdns.managed)}<br>`;
+    } else {
+      html += `<span class="fqdn-dim">bearer  → </span><span style="color:rgba(255,94,147,0.5)">fill in EId, SId, GCC…</span><br>`;
+    }
+    if (svcFqdn) {
+      html += `<span class="fqdn-dim">svc     → </span>${escHtml(svcFqdn)}<br>`;
+      html += `<span class="fqdn-dim">epg     → _radioepg._tcp.</span>${escHtml(svcFqdn)}<br>`;
+      html += `<span class="fqdn-dim">spi     → _radiospi._tcp.</span>${escHtml(svcFqdn)}`;
+    }
+    previewVal.innerHTML = html || '<span style="color:rgba(1,205,254,0.3)">fill in DAB fields above…</span>';
+    return;
+  }
 
   if (band !== 'FM') {
     if (svcFqdn) {
@@ -267,9 +319,10 @@ function updatePreview() {
     return;
   }
 
-  const freq = (document.getElementById('f-freq').value || '').trim();
-  const pi   = (document.getElementById('f-pi').value || '').trim();
-  const ecc  = (document.getElementById('f-ecc').value || '').trim();
+  const freq    = (document.getElementById('f-freq').value || '').trim();
+  const pi      = (document.getElementById('f-pi').value || '').trim();
+  const ecc     = (document.getElementById('f-ecc').value || '').trim();
+  const country = (document.getElementById('f-country')?.value || '').trim().toUpperCase();
 
   const freqResult = validateFreq('FM', freq);
 
@@ -278,21 +331,30 @@ function updatePreview() {
     return;
   }
 
-  // Show inline validation error for frequency
   if (freq && !freqResult.ok) {
     previewVal.innerHTML = `<span style="color:var(--err)">⚠ ${escHtml(freqResult.error)}</span>`;
     return;
   }
 
   const fqdns = freqResult.freq5 && pi && ecc ? buildFQDNs(freqResult.freq5, pi, ecc) : null;
+  // Country code fallback bearer (when ECC missing)
+  const countryBearer = freqResult.freq5 && pi && !ecc && /^[A-Z]{2}$/.test(country)
+    ? { bearer: `${freqResult.freq5}.${pi.toLowerCase()}.${country.toLowerCase()}.fm.radiodns.org`,
+        managed: `${freqResult.freq5}.${pi.toLowerCase()}.${country.toLowerCase()}.fm.${PDNS_ZONE}` }
+    : null;
 
   let html = '';
   if (fqdns) {
     html += `<span class="fqdn-dim">bearer  → </span>${escHtml(fqdns.bearer)}<br>`;
     html += `<span class="fqdn-dim">managed → </span>${escHtml(fqdns.managed)}<br>`;
+    if (country && /^[A-Z]{2}$/.test(country)) {
+      html += `<span class="fqdn-dim">country → </span><span style="color:rgba(1,205,254,0.45)">${escHtml(freqResult.freq5)}.${escHtml(pi.toLowerCase())}.${escHtml(country.toLowerCase())}.fm.radiodns.org</span><br>`;
+    }
+  } else if (countryBearer) {
+    html += `<span class="fqdn-dim">bearer  → </span>${escHtml(countryBearer.bearer)} <span style="color:var(--warn);font-size:0.72rem">(country fallback)</span><br>`;
+    html += `<span class="fqdn-dim">managed → </span>${escHtml(countryBearer.managed)}<br>`;
   } else if (freqResult.freq5) {
-    html += `<span class="fqdn-dim">bearer  → </span><span style="color:rgba(255,94,147,0.5)">fill in PI and ECC…</span><br>`;
-    html += `<span class="fqdn-dim">managed → </span><span style="color:rgba(255,94,147,0.5)">fill in PI and ECC…</span><br>`;
+    html += `<span class="fqdn-dim">bearer  → </span><span style="color:rgba(255,94,147,0.5)">fill in PI and ECC (or country code)…</span><br>`;
   }
   if (svcFqdn) {
     html += `<span class="fqdn-dim">svc     → </span>${escHtml(svcFqdn)}<br>`;
@@ -301,13 +363,11 @@ function updatePreview() {
   }
   previewVal.innerHTML = html || '<span style="color:rgba(1,205,254,0.3)">fill in fields above…</span>';
 
-  // Auto-run bearer check when all FM fields are complete
-  if (fqdns && svcFqdn) {
-    scheduleAutoCheck();
-  }
+  if ((fqdns || countryBearer) && svcFqdn) scheduleAutoCheck();
 }
 
-['f-callsign','f-freq','f-pi','f-ecc','f-epg','f-spi'].forEach(id => {
+['f-callsign','f-freq','f-pi','f-ecc','f-country','f-epg','f-spi',
+ 'f-eid','f-sid','f-scids','f-gcc-dab'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('input', updatePreview);
 });
@@ -402,6 +462,16 @@ function generateRecords() {
     records.push({ fqdn: fqdns.managed, record_type: 'CNAME', record_value: absDot(svcFqdn), ttl: 300 });
     records.push({ fqdn: `_radioepg._tcp.${svcFqdn}`, record_type: 'SRV', record_value: `0 100 80 ${absDot(epg)}`, ttl: 300 });
     records.push({ fqdn: `_radiospi._tcp.${svcFqdn}`, record_type: 'SRV', record_value: `0 100 80 ${absDot(spi)}`, ttl: 300 });
+  } else if (band === 'DAB') {
+    const eid   = (document.getElementById('f-eid')?.value   || '').trim();
+    const sid   = (document.getElementById('f-sid')?.value   || '').trim();
+    const scids = (document.getElementById('f-scids')?.value || '0').trim();
+    const gcc   = (document.getElementById('f-gcc-dab')?.value || '').trim();
+    const fqdns = buildDABFQDN(scids, sid, eid, gcc);
+    if (!fqdns) { alert('Invalid DAB fields — check EId (4 hex), SId (4–8 hex), GCC (3 hex)'); return null; }
+    records.push({ fqdn: fqdns.managed, record_type: 'CNAME', record_value: absDot(svcFqdn), ttl: 300 });
+    records.push({ fqdn: `_radioepg._tcp.${svcFqdn}`, record_type: 'SRV', record_value: `0 100 80 ${absDot(epg)}`, ttl: 300 });
+    records.push({ fqdn: `_radiospi._tcp.${svcFqdn}`, record_type: 'SRV', record_value: `0 100 80 ${absDot(spi)}`, ttl: 300 });
   } else if (band === 'AM') {
     const freqResult = validateFreq('AM', freq);
     if (!freqResult.ok) { alert(freqResult.error); return null; }
@@ -465,8 +535,21 @@ async function saveStation() {
     }
   }
 
+  const country_code = (document.getElementById('f-country')?.value || '').trim().toUpperCase();
+  const dab_eid   = (document.getElementById('f-eid')?.value   || '').trim();
+  const dab_sid   = (document.getElementById('f-sid')?.value   || '').trim();
+  const dab_scids = (document.getElementById('f-scids')?.value || '').trim();
+  const dab_gcc   = (document.getElementById('f-gcc-dab')?.value || '').trim();
+
   const body = { callsign, band, frequency, pi_code, ecc, epg_host, spi_host,
                  provider_name, website, contact_email };
+  if (country_code) body.country_code = country_code;
+  if (band === 'DAB') {
+    body.eid     = dab_eid;
+    body.sid     = dab_sid;
+    body.scids   = dab_scids || '0';
+    body.gcc_dab = dab_gcc;
+  }
   if (admin_key) body.admin_key = admin_key;
 
   const saveStatus = document.getElementById('save-status');
