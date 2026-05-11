@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ＲＡＤＩＯＤＮＳ · tune in to the resolver</title>
+  <title>ZERO TRUST RADIO · Hybrid Radio Infrastructure</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,23 +21,32 @@
       <div class="brand">
         <img class="logo" src="{{ url_for('static', filename='logo.svg') }}" alt="" />
         <div class="title">
-          <h1 data-text="ＲＡＤＩＯＤＮＳ">ＲＡＤＩＯＤＮＳ</h1>
-          <p class="tag">▒░ tune  in   ░ ▒   resolve   ░ ▒   broadcast  ░▒</p>
+          <h1 data-text="ZERO TRUST RADIO">ZERO TRUST RADIO</h1>
+          <p class="tag">▒░ hybrid  radio  infrastructure  ░ ▒  powered  by  massdns  ░▒</p>
         </div>
       </div>
-      <p class="subtag">📡 streaming dns records on 88.8 FM · all night long ▶</p>
+      <p class="subtag">📡 connected radio · managed RadioDNS · DNS scanning engine · broadcasting from the cloud ▶</p>
     </header>
 
+    <!-- Platform CTA -->
+    <div class="platform-bar">
+      <div class="platform-bar-left">
+        <span class="platform-label">PLATFORM</span>
+        <span class="platform-desc">Station registration · SPI metadata · PowerDNS provisioning · DO Spaces CDN</span>
+      </div>
+      <a href="/service" class="platform-cta">▶ LAUNCH HYBRID RADIO INFRASTRUCTURE</a>
+    </div>
+
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-tab="resolver">◤ resolver</button>
-      <button class="tab" data-tab="pipeline">◤ radiodns pipeline</button>
-      <button class="tab" data-tab="db">◤ database</button>
-      <a class="tab tab-link" href="/service">◤ hybrid radio ✦</a>
+      <button class="tab active" data-tab="resolver">◤ dns scanner</button>
+      <button class="tab" data-tab="pipeline">◤ discovery pipeline</button>
+      <button class="tab" data-tab="db">◤ scan database</button>
     </nav>
 
-    <!-- ===================== RESOLVER TAB ===================== -->
+    <!-- ===================== DNS SCANNER TAB ===================== -->
     <section class="tab-panel active" data-tab="resolver">
       <section class="panel">
+        <p class="hint" style="margin-bottom:1rem">Bulk DNS resolver powered by massdns — used internally to verify RadioDNS CNAME and SRV records at scale.</p>
         <div class="row">
           <label class="field grow">
             <span class="lbl">◢ DOMAINS <em>// one per line · max {{ max_domains }}</em></span>
@@ -85,9 +94,8 @@
     <!-- ===================== PIPELINE TAB ===================== -->
     <section class="tab-panel" data-tab="pipeline">
       <p class="hint">
-        Run the global RadioDNS discovery pipeline step-by-step. Each step
-        reads its input from the shared database (or accepts overrides),
-        writes its output back, and streams progress here.
+        RadioDNS discovery pipeline — scans the FM band to find broadcaster CNAMEs and SRV endpoints.
+        Results feed the <a href="/service" style="color:var(--cyan)">Hybrid Radio Infrastructure</a> station database.
       </p>
 
       <!-- step 1: generate -->
@@ -263,8 +271,8 @@
     </section>
 
     <footer>
-      <code>POST /resolve</code> · <a href="/api">/api</a> · <a href="/rdns/info">/rdns/info</a> · <a href="/healthz">/healthz</a> · <a href="/service">hybrid radio</a>
-      <div class="copy">▼ ｐｏｗｅｒｅｄ ｂｙ massdns · broadcasting from the cloud horizon ▼</div>
+      <a href="/service">◉ hybrid radio platform</a> · <code>POST /resolve</code> · <a href="/api">/api</a> · <a href="/rdns/info">/rdns/info</a> · <a href="/healthz">/healthz</a>
+      <div class="copy">▼ ｚｅｒｏ ｔｒｕｓｔ ｒａｄｉｏ · massdns DNS engine · broadcasting from the cloud horizon ▼</div>
     </footer>
   </main>
 
