@@ -917,6 +917,78 @@ def _check_bearer_dns(bearer_fqdn: str, managed_zone: str) -> dict:
                 "message": f"DNS check unavailable: {e}"}
 
 
+_RADIO_BROWSER_HOST = "de1.api.radio-browser.info"
+
+def _radio_browser_lookup(callsign: str, band: str = "FM") -> list:
+    """Search Radio Browser API by callsign. Returns list of candidate dicts."""
+    import re as _re
+    import requests as _req
+
+    url = f"https://{_RADIO_BROWSER_HOST}/json/stations/search"
+    try:
+        r = _req.get(url, params={"name": callsign, "limit": 20},
+                     headers={"User-Agent": "ZeroTrustRadio/1.0"},
+                     timeout=8)
+        r.raise_for_status()
+        stations = r.json()
+    except Exception as e:
+        return []
+
+    cs_upper = callsign.strip().upper()
+    results = []
+    for s in stations:
+        name = (s.get("name") or "").strip()
+        # Must contain the callsign as a word
+        if cs_upper not in name.upper():
+            continue
+
+        # Try to parse frequency from name like "88.5 KQED" or "KQED 88.5"
+        freq_match = _re.search(r'\b(\d{2,3}(?:\.\d{1,2})?)\s*(?:MHz|FM|AM)?\b', name, _re.I)
+        frequency = freq_match.group(1) if freq_match else None
+
+        # Infer band from name
+        inferred_band = "AM" if "AM" in name.upper() else "FM"
+
+        results.append({
+            "stationuuid": s.get("stationuuid"),
+            "name": name,
+            "callsign": cs_upper,
+            "frequency": frequency,
+            "band": inferred_band,
+            "homepage": s.get("homepage") or "",
+            "favicon": s.get("favicon") or "",
+            "countrycode": s.get("countrycode") or "",
+            "country": s.get("country") or "",
+            "state": s.get("state") or "",
+            "language": s.get("language") or "",
+            "tags": s.get("tags") or "",
+            "stream_url": s.get("url_resolved") or s.get("url") or "",
+            "source": "radio-browser",
+        })
+
+    # Put exact callsign matches first
+    results.sort(key=lambda x: (0 if x["name"].upper().startswith(cs_upper) else 1))
+    return results[:5]
+
+
+@bp.get("/lookup")
+def station_lookup():
+    """Look up station details from Radio Browser by callsign.
+
+    Query params: callsign, band (optional)
+    Returns list of matching station candidates with auto-fillable fields.
+    """
+    callsign = (request.args.get("callsign") or "").strip()
+    band = (request.args.get("band") or "FM").strip().upper()
+    if not callsign:
+        return jsonify({"error": "callsign is required"}), 400
+    if len(callsign) > 20:
+        return jsonify({"error": "callsign too long"}), 400
+
+    results = _radio_browser_lookup(callsign, band)
+    return jsonify({"callsign": callsign, "results": results, "source": "radio-browser"})
+
+
 @bp.get("/onboard")
 def onboard_ui():
     from flask import render_template
