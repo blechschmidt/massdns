@@ -825,3 +825,32 @@ footer .copy {
 }
 .db-table td.null { color: rgba(181, 168, 255, 0.4); font-style: italic; }
 .db-table tbody tr:hover { background: rgba(255, 42, 252, 0.07); }
+
+/* === platform bar === */
+.platform-bar {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 12px; margin: 14px 0 4px;
+  background: linear-gradient(135deg, rgba(185,103,255,0.12), rgba(1,205,254,0.08));
+  border: 1px solid rgba(185,103,255,0.35); border-radius: 10px;
+  padding: 12px 18px;
+}
+.platform-bar-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.platform-label {
+  font-family: var(--display); font-size: 0.65rem; font-weight: 700; letter-spacing: 0.18em;
+  color: var(--purple); background: rgba(185,103,255,0.2); border: 1px solid rgba(185,103,255,0.4);
+  border-radius: 4px; padding: 2px 8px; white-space: nowrap;
+}
+.platform-desc {
+  font-family: var(--mono); font-size: 0.75rem; color: var(--muted);
+}
+.platform-cta {
+  font-family: var(--display); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.14em;
+  padding: 8px 18px; text-decoration: none; white-space: nowrap;
+  background: linear-gradient(135deg, rgba(255,42,252,0.3), rgba(123,0,255,0.4));
+  color: var(--ink); border: 1px solid var(--pink); border-radius: 6px;
+  transition: all 0.15s ease; text-transform: uppercase;
+}
+.platform-cta:hover {
+  background: linear-gradient(135deg, rgba(255,42,252,0.5), rgba(123,0,255,0.6));
+  box-shadow: 0 0 20px rgba(255,42,252,0.3);
+}
