@@ -921,11 +921,15 @@ def _check_bearer_dns(bearer_fqdn: str, managed_zone: str) -> dict:
 def onboard_ui():
     from flask import render_template
     zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
+    epg = os.environ.get("EPG_HOST", "epg.zerotrustradio.org")
     return render_template(
         "onboard.html",
         pdns_zone=zone,
-        epg_default=os.environ.get("EPG_HOST", "epg.zerotrustradio.org"),
-        spi_default=os.environ.get("SPI_HOST", os.environ.get("EPG_HOST", "epg.zerotrustradio.org")),
+        epg_default=epg,
+        spi_default=os.environ.get("SPI_HOST", epg),
+        provider_default=os.environ.get("PROVIDER_NAME", "Zero Trust Radio"),
+        website_default=os.environ.get("PROVIDER_WEBSITE", "https://zerotrustradio.org"),
+        contact_default=os.environ.get("CONTACT_EMAIL", "ops@zerotrustradio.org"),
     )
 
 
