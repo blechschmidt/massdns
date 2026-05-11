@@ -589,6 +589,7 @@ footer .copy {
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 .tab:hover { color: var(--ink); border-color: var(--cyan); }
+.tab.tab-link { text-decoration: none; display: inline-flex; align-items: center; }
 .tab.active {
   color: var(--ink);
   background: linear-gradient(180deg, rgba(255, 42, 252, 0.45), rgba(123, 0, 255, 0.55));
