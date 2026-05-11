@@ -815,6 +815,108 @@ def _validate_zone(fqdn: str, zone: str) -> bool:
     return f == z or f.endswith("." + z)
 
 
+# FM band: 87.5–108.0 MHz expressed as 10 kHz units (8750–10800)
+_FM_FREQ_MIN = 8750
+_FM_FREQ_MAX = 10800
+# AM band: 530–1710 kHz
+_AM_FREQ_MIN = 530
+_AM_FREQ_MAX = 1710
+
+PUBLIC_RADIODNS_SUFFIX = "fm.radiodns.org"
+
+
+def _parse_freq_for_band(band: str, frequency: str):
+    """Parse and range-validate a frequency string for the given band.
+
+    Returns (freq5_str_or_None, freq_int, error_str_or_None).
+    freq5 is the 5-digit 10 kHz representation used in FM FQDNs.
+    For non-FM bands freq5 is None.
+    """
+    import re as _re
+    band = band.upper()
+    raw = str(frequency).strip().lower().replace("mhz", "").replace("khz", "").strip()
+
+    if band == "STREAMING":
+        return None, None, None
+
+    if not raw:
+        return None, None, f"frequency is required for {band}"
+
+    try:
+        if "." in raw:
+            val_f = float(raw)
+        else:
+            val_f = float(raw)
+    except ValueError:
+        return None, None, f"invalid frequency: {frequency!r}"
+
+    if band == "FM":
+        # Accept MHz float (< 200) or already-converted 10 kHz int (>= 200)
+        if val_f >= 200:
+            freq_10khz = round(val_f)
+        else:
+            freq_10khz = round(val_f * 100)
+        if not (_FM_FREQ_MIN <= freq_10khz <= _FM_FREQ_MAX):
+            mhz_lo = _FM_FREQ_MIN / 100
+            mhz_hi = _FM_FREQ_MAX / 100
+            return None, None, (
+                f"FM frequency must be {mhz_lo}–{mhz_hi} MHz "
+                f"(got {frequency!r}). Use AM band for AM kHz frequencies."
+            )
+        return f"{freq_10khz:05d}", freq_10khz, None
+
+    if band == "AM":
+        # Accept kHz integer
+        if val_f != round(val_f):
+            return None, None, "AM frequency must be a whole number of kHz (e.g. 780)"
+        freq_khz = round(val_f)
+        if not (_AM_FREQ_MIN <= freq_khz <= _AM_FREQ_MAX):
+            return None, None, (
+                f"AM frequency must be {_AM_FREQ_MIN}–{_AM_FREQ_MAX} kHz "
+                f"(got {frequency!r})"
+            )
+        return None, freq_khz, None
+
+    if band == "HD":
+        return None, None, "HD band is not yet implemented; use FM or AM"
+
+    return None, None, f"unsupported band: {band}"
+
+
+def _check_bearer_dns(bearer_fqdn: str, managed_zone: str) -> dict:
+    """Query Cloudflare DNS-over-HTTPS for a CNAME on the public bearer FQDN.
+
+    Returns dict with keys: exists, target, conflict, message.
+    """
+    import requests as _req
+    managed_zone = managed_zone.rstrip(".").lower()
+    try:
+        r = _req.get(
+            "https://cloudflare-dns.com/dns-query",
+            params={"name": bearer_fqdn, "type": "CNAME"},
+            headers={"Accept": "application/dns-json"},
+            timeout=6,
+        )
+        if r.status_code != 200:
+            return {"exists": False, "target": None, "conflict": False,
+                    "message": f"DoH lookup returned HTTP {r.status_code}"}
+        body = r.json()
+        answers = body.get("Answer") or []
+        cname_answers = [a for a in answers if a.get("type") == 5]  # CNAME type=5
+        if not cname_answers:
+            return {"exists": False, "target": None, "conflict": False,
+                    "message": "available — no public RadioDNS record found"}
+        target = cname_answers[0].get("data", "").rstrip(".")
+        target_lower = target.lower()
+        conflict = not (target_lower == managed_zone or target_lower.endswith("." + managed_zone))
+        msg = ("existing RadioDNS record points outside managed zone"
+               if conflict else "existing — already points to our managed zone")
+        return {"exists": True, "target": target, "conflict": conflict, "message": msg}
+    except Exception as e:
+        return {"exists": None, "target": None, "conflict": False,
+                "message": f"DNS check unavailable: {e}"}
+
+
 @bp.get("/onboard")
 def onboard_ui():
     from flask import render_template
@@ -825,6 +927,51 @@ def onboard_ui():
         epg_default=os.environ.get("EPG_HOST", "epg.zerotrustradio.org"),
         spi_default=os.environ.get("SPI_HOST", os.environ.get("EPG_HOST", "epg.zerotrustradio.org")),
     )
+
+
+@bp.post("/check")
+def check_bearer():
+    """Check whether a public RadioDNS bearer FQDN already exists in DNS.
+
+    Body: { band, frequency, pi_code, ecc }
+    Returns: { bearer_fqdn, exists, target, conflict, message }
+    """
+    body = request.get_json(silent=True) or {}
+    band = (body.get("band") or "FM").strip().upper()
+    frequency = (body.get("frequency") or "").strip()
+    pi_code = (body.get("pi_code") or "").strip().lower()
+    ecc = (body.get("ecc") or "").strip().lower()
+
+    freq5, freq_int, freq_err = _parse_freq_for_band(band, frequency)
+    if freq_err:
+        return jsonify({"error": freq_err}), 400
+
+    if band != "FM":
+        return jsonify({
+            "bearer_fqdn": None,
+            "exists": False,
+            "target": None,
+            "conflict": False,
+            "message": f"public RadioDNS bearer check only applies to FM (got {band})",
+        })
+
+    if not pi_code:
+        return jsonify({"error": "pi_code is required for FM bearer check"}), 400
+    if not ecc:
+        return jsonify({"error": "ecc is required for FM bearer check"}), 400
+
+    try:
+        from radiodns_mapper.generator import build_gcc, normalize_pi, normalize_ecc
+        pi_norm = normalize_pi(pi_code)
+        ecc_norm = normalize_ecc(ecc)
+        gcc = build_gcc(pi_norm, ecc_norm)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    bearer_fqdn = f"{freq5}.{pi_norm}.{gcc}.{PUBLIC_RADIODNS_SUFFIX}"
+    zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
+    result = _check_bearer_dns(bearer_fqdn, zone)
+    return jsonify({"bearer_fqdn": bearer_fqdn, **result})
 
 
 @bp.post("/stations")
@@ -840,15 +987,12 @@ def create_station():
 
     if not callsign:
         return jsonify({"error": "callsign is required"}), 400
-    if not frequency:
-        return jsonify({"error": "frequency is required"}), 400
     if band not in ("FM", "AM", "HD", "STREAMING"):
         return jsonify({"error": f"unsupported band: {band}"}), 400
 
-    callsign_clean = callsign.lower().replace(" ", "-")
-    # Only allow alphanumeric + hyphen in callsign for DNS safety
     import re as _re
-    callsign_clean = _re.sub(r"[^a-z0-9\-]", "", callsign_clean)
+    callsign_clean = _re.sub(r"[^a-z0-9\-]", "",
+                             callsign.lower().replace(" ", "-"))
     if not callsign_clean:
         return jsonify({"error": "callsign produces empty DNS label after cleaning"}), 400
 
@@ -862,9 +1006,15 @@ def create_station():
 
     zone = os.environ.get("PDNS_ZONE", "radiodns.zerotrustradio.org")
 
-    freq5 = None
+    # Validate frequency for band
+    freq5, freq_int, freq_err = _parse_freq_for_band(band, frequency or "")
+    if freq_err:
+        return jsonify({"error": freq_err}), 400
+
+    freq5_str = None
     gcc = None
-    fqdn = None
+    managed_fqdn = None   # CNAME source in our zone
+    bearer_fqdn = None    # public radiodns.org bearer
     svc_fqdn = f"{callsign_clean}.svc.{zone}"
     records = []
 
@@ -875,57 +1025,48 @@ def create_station():
             return jsonify({"error": "ecc is required for FM band"}), 400
         try:
             from radiodns_mapper.generator import (
-                parse_freq, build_fqdn as _build_fqdn, build_gcc,
-                normalize_pi, normalize_ecc,
+                build_gcc, normalize_pi, normalize_ecc,
             )
             pi_norm = normalize_pi(pi_code)
             ecc_norm = normalize_ecc(ecc)
-            freq_int = parse_freq(frequency)
-            freq5 = f"{freq_int:05d}"
             gcc = build_gcc(pi_norm, ecc_norm)
-            # Our zone variant: replace fm.radiodns.org suffix with fm.<zone>
-            fqdn = f"{freq5}.{pi_norm}.{gcc}.fm.{zone}"
+            freq5_str = freq5
+            managed_fqdn = f"{freq5_str}.{pi_norm}.{gcc}.fm.{zone}"
+            bearer_fqdn = f"{freq5_str}.{pi_norm}.{gcc}.{PUBLIC_RADIODNS_SUFFIX}"
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
-        if not _validate_zone(fqdn, zone):
+        if not _validate_zone(managed_fqdn, zone):
             return jsonify({"error": f"generated FQDN is outside zone {zone}"}), 400
 
-        # CNAME record
         records.append({
-            "fqdn": fqdn,
+            "fqdn": managed_fqdn,
             "record_type": "CNAME",
             "record_value": _abs_dot(svc_fqdn),
             "ttl": 300,
         })
-        # EPG SRV record
-        epg_srv_name = f"_radioepg._tcp.{svc_fqdn}"
         records.append({
-            "fqdn": epg_srv_name,
+            "fqdn": f"_radioepg._tcp.{svc_fqdn}",
             "record_type": "SRV",
             "record_value": f"0 100 80 {_abs_dot(epg_host)}",
             "ttl": 300,
         })
-        # SPI SRV record
-        spi_srv_name = f"_radiospi._tcp.{svc_fqdn}"
         records.append({
-            "fqdn": spi_srv_name,
+            "fqdn": f"_radiospi._tcp.{svc_fqdn}",
             "record_type": "SRV",
             "record_value": f"0 100 80 {_abs_dot(spi_host)}",
             "ttl": 300,
         })
     else:
-        # Non-FM: just create SRV records under svc_fqdn
-        epg_srv_name = f"_radioepg._tcp.{svc_fqdn}"
+        # Non-FM: SRV records only under svc_fqdn
         records.append({
-            "fqdn": epg_srv_name,
+            "fqdn": f"_radioepg._tcp.{svc_fqdn}",
             "record_type": "SRV",
             "record_value": f"0 100 80 {_abs_dot(epg_host)}",
             "ttl": 300,
         })
-        spi_srv_name = f"_radiospi._tcp.{svc_fqdn}"
         records.append({
-            "fqdn": spi_srv_name,
+            "fqdn": f"_radiospi._tcp.{svc_fqdn}",
             "record_type": "SRV",
             "record_value": f"0 100 80 {_abs_dot(spi_host)}",
             "ttl": 300,
@@ -938,8 +1079,8 @@ def create_station():
                (callsign, band, frequency, freq5, pi_code, ecc, gcc, fqdn, svc_fqdn,
                 epg_host, spi_host, website, contact_email, provider_name)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (callsign, band, frequency, freq5, pi_code or None, ecc or None,
-             gcc, fqdn, svc_fqdn, epg_host, spi_host, website or None,
+            (callsign, band, frequency, freq5_str, pi_code or None, ecc or None,
+             gcc, managed_fqdn, svc_fqdn, epg_host, spi_host, website or None,
              contact_email or None, provider_name or None),
         )
         station_id = cur.lastrowid
@@ -961,6 +1102,13 @@ def create_station():
         ).fetchone())
 
     station["records"] = rec_rows
+    station["bearer_fqdn"] = bearer_fqdn
+    station["managed_fqdn"] = managed_fqdn
+    station["svc_fqdn"] = svc_fqdn
+    station["epg_srv_fqdn"] = f"_radioepg._tcp.{svc_fqdn}"
+    station["spi_srv_fqdn"] = f"_radiospi._tcp.{svc_fqdn}"
+    station["freq5"] = freq5_str
+    station["gcc"] = gcc
     return jsonify(station), 201
 
 
@@ -1225,6 +1373,7 @@ def info():
             "POST /rdns/parse-si":             "parse stored SI.xml into stations",
             "POST /rdns/expand-hits":              "PI/freq sweep around confirmed hits",
             "GET  /rdns/onboard":                  "station onboarding UI",
+            "POST /rdns/check":                    "check public RadioDNS bearer DNS (pre-save)",
             "POST /rdns/stations":                 "register a new station",
             "GET  /rdns/stations":                 "list all registered stations",
             "GET  /rdns/stations/<id>":            "get station with records",
