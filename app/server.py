@@ -172,14 +172,14 @@ def index():
 
 def _live_status():
     """Collect lightweight platform status for the homepage panel."""
-    import sqlite3 as _sqlite3
     db_ok = False
     candidate_count = 0
     try:
-        conn = _sqlite3.connect(RADIODNS_DB, timeout=2)
-        row = conn.execute("SELECT COUNT(*) FROM candidate_domains").fetchone()
-        candidate_count = row[0] if row else 0
-        conn.close()
+        # Use the same db_compat layer as rdns_routes so MySQL/PostgreSQL DSNs work.
+        from radiodns_mapper.db_compat import connect
+        with connect(RADIODNS_DB) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM candidate_domains").fetchone()
+            candidate_count = row[0] if row else 0
         db_ok = True
     except Exception:
         pass
@@ -221,7 +221,6 @@ def _api_info():
     })
 
 
-@app.get("/health")
 @app.get("/healthz")
 def healthz():
     if not os.path.exists(MASSDNS_BIN):
@@ -282,6 +281,53 @@ def v1_identity_resolve():
             "pipeline": "radiodns_mapper (CNAME + SRV)",
         },
     })
+
+
+# ---------------------------------------------------------------------------
+# /routes — debug endpoint listing every registered route
+# ---------------------------------------------------------------------------
+@app.get("/routes")
+def list_routes():
+    routes = []
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+        routes.append({
+            "path": rule.rule,
+            "methods": sorted(m for m in rule.methods if m not in ("HEAD", "OPTIONS")),
+            "endpoint": rule.endpoint,
+        })
+    return jsonify(routes)
+
+
+# ---------------------------------------------------------------------------
+# /service/* aliases — work regardless of Node.js radio-service component
+# ---------------------------------------------------------------------------
+@app.get("/service/info")
+def service_info():
+    return redirect("/rdns/info")
+
+
+@app.get("/service/stations")
+def service_stations():
+    limit = request.args.get("limit", "200")
+    return redirect(f"/rdns/db/candidate_domains?limit={limit}")
+
+
+@app.get("/service/status")
+def service_status():
+    return redirect("/rdns/db/summary")
+
+
+@app.post("/service/register")
+def service_register():
+    return jsonify({
+        "error": "not_implemented",
+        "message": "Station registration requires the radio-service component. "
+                   "Use POST /rdns/generate to seed candidate domains instead.",
+        "alternatives": {
+            "seed_pipeline": "POST /rdns/generate",
+            "info": "GET /rdns/info",
+        },
+    }), 501
 
 
 def _parse_domains():
