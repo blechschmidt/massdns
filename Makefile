@@ -1,4 +1,7 @@
+DESTDIR ?=
 PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+MANDIR ?= $(PREFIX)/man
 PROJECT_FLAGS=-DMASSDNS_REVISION=\"$(shell git describe --tags --dirty=+)\"
 
 all:
@@ -14,7 +17,7 @@ debugnolinux:
 	mkdir -p bin
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(PROJECT_FLAGS) -O0 -std=c11 -Wall -fstack-protector-strong -g -DDEBUG src/main.c -o bin/massdns
 install:
-	mkdir -p $(PREFIX)/bin
-	mkdir -p $(PREFIX)/man/man1
-	install -m 0755 bin/massdns $(PREFIX)/bin
-	install -m 0644 doc/massdns.1 $(PREFIX)/man/man1
+	mkdir -p $(DESTDIR)$(BINDIR)
+	mkdir -p $(DESTDIR)$(MANDIR)/man1
+	install -m 0755 bin/massdns $(DESTDIR)$(BINDIR)/
+	install -m 0644 doc/massdns.1 $(DESTDIR)$(MANDIR)/man1/
